@@ -1,4 +1,5 @@
 const http = require('node:http');
+const { Readable } = require('node:stream');
 const crypto = require('node:crypto');
 const { URL } = require('node:url');
 const {
@@ -79,7 +80,7 @@ function createApp({
   timezone = process.env.TIMEZONE || 'Asia/Kolkata',
   clock = () => new Date(),
 }) {
-  const server = http.createServer(async (req, res) => {
+  const requestHandler = async (req, res) => {
     try {
       // Handle CORS preflight
       if (req.method === 'OPTIONS') {
@@ -340,7 +341,64 @@ function createApp({
         error: 'Internal server error',
       });
     }
-  });
+  };
+
+  const server = http.createServer(requestHandler);
+
+  /**
+   * In-process HTTP request injection helper (similar to Fastify's server.inject)
+   * so tests can execute without requiring OS TCP socket permissions.
+   */
+  server.inject = async ({
+    method = 'GET',
+    url = '/',
+    headers = {},
+    body = null,
+  }) => {
+    const normalizedHeaders = {};
+    for (const [k, v] of Object.entries(headers)) {
+      normalizedHeaders[k.toLowerCase()] = v;
+    }
+
+    const bodyBuffer =
+      body === null || body === undefined
+        ? Buffer.alloc(0)
+        : typeof body === 'string'
+          ? Buffer.from(body)
+          : Buffer.from(JSON.stringify(body));
+
+    const req = Readable.from(bodyBuffer.length ? [bodyBuffer] : []);
+    req.method = method.toUpperCase();
+    req.url = url;
+    req.headers = { host: 'localhost', ...normalizedHeaders };
+
+    return new Promise((resolve) => {
+      let statusCode = 200;
+      let resHeaders = {};
+      const chunks = [];
+
+      const res = {
+        writeHead(code, hdrs = {}) {
+          statusCode = code;
+          resHeaders = { ...resHeaders, ...hdrs };
+        },
+        end(chunk) {
+          if (chunk) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          }
+          const rawBody = Buffer.concat(chunks).toString('utf8');
+          resolve({
+            status: statusCode,
+            headers: resHeaders,
+            text: async () => rawBody,
+            json: async () => (rawBody ? JSON.parse(rawBody) : null),
+          });
+        },
+      };
+
+      requestHandler(req, res);
+    });
+  };
 
   return server;
 }
