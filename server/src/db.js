@@ -3,6 +3,45 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 /**
+ * One-time migration for databases created before the PRESENT/ABSENT model.
+ * Old schema allowed 'PRESENT' | 'LATE' | 'MANUAL' with a NOT NULL check_in_time.
+ * Mapping: LATE -> ABSENT (arrived after window end), MANUAL -> PRESENT.
+ */
+function migrateLegacyAttendanceTable(db) {
+  const row = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'attendance_log'"
+    )
+    .get();
+  if (!row || !String(row.sql).includes("'LATE'")) return;
+
+  db.exec(`
+    BEGIN;
+    CREATE TABLE attendance_log_new (
+      date TEXT PRIMARY KEY,
+      check_in_time TEXT,
+      status TEXT NOT NULL CHECK(status IN ('PRESENT', 'ABSENT')),
+      trigger_type TEXT DEFAULT 'GEOFENCE',
+      latitude REAL,
+      longitude REAL,
+      notes TEXT
+    );
+    INSERT INTO attendance_log_new (
+      date, check_in_time, status, trigger_type, latitude, longitude, notes
+    )
+    SELECT
+      date,
+      check_in_time,
+      CASE status WHEN 'LATE' THEN 'ABSENT' ELSE 'PRESENT' END,
+      trigger_type, latitude, longitude, notes
+    FROM attendance_log;
+    DROP TABLE attendance_log;
+    ALTER TABLE attendance_log_new RENAME TO attendance_log;
+    COMMIT;
+  `);
+}
+
+/**
  * Initializes the SQLite database with the 2-table simplified schema
  * (`settings` and `attendance_log`) and provides data access methods.
  *
@@ -41,8 +80,8 @@ function createDatabase(dbPath) {
 
     CREATE TABLE IF NOT EXISTS attendance_log (
       date TEXT PRIMARY KEY,
-      check_in_time TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('PRESENT', 'LATE', 'MANUAL')),
+      check_in_time TEXT,
+      status TEXT NOT NULL CHECK(status IN ('PRESENT', 'ABSENT')),
       trigger_type TEXT DEFAULT 'GEOFENCE',
       latitude REAL,
       longitude REAL,
@@ -55,6 +94,8 @@ function createDatabase(dbPath) {
       1, 'Office', 0.0, 0.0, 100, '09:00', '10:00', '1,2,3,4,5'
     );
   `);
+
+  migrateLegacyAttendanceTable(db);
 
   const getSettingsStmt = db.prepare(`
     SELECT id, work_name, work_latitude, work_longitude, radius_meters,
@@ -89,17 +130,32 @@ function createDatabase(dbPath) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const upsertCheckInStmt = db.prepare(`
-    INSERT INTO attendance_log (
-      date, check_in_time, status, trigger_type, latitude, longitude, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  // Fills in an arrival on a day that was auto-marked ABSENT before the arrival reached the server
+  const updateAutoAbsentStmt = db.prepare(`
+    UPDATE attendance_log
+    SET check_in_time = ?, status = ?, trigger_type = ?, latitude = ?, longitude = ?,
+        notes = COALESCE(?, notes)
+    WHERE date = ? AND trigger_type = 'AUTO'
+  `);
+
+  // Explicit user choice from the calendar; keeps any previously logged arrival time
+  const upsertManualStmt = db.prepare(`
+    INSERT INTO attendance_log (date, check_in_time, status, trigger_type, notes)
+    VALUES (?, ?, ?, 'MANUAL', ?)
     ON CONFLICT(date) DO UPDATE SET
-      check_in_time = excluded.check_in_time,
+      check_in_time = COALESCE(excluded.check_in_time, attendance_log.check_in_time),
       status = excluded.status,
-      trigger_type = excluded.trigger_type,
-      latitude = COALESCE(excluded.latitude, attendance_log.latitude),
-      longitude = COALESCE(excluded.longitude, attendance_log.longitude),
-      notes = COALESCE(excluded.notes, attendance_log.notes)
+      trigger_type = 'MANUAL',
+      notes = excluded.notes
+  `);
+
+  const insertAutoAbsentStmt = db.prepare(`
+    INSERT OR IGNORE INTO attendance_log (date, check_in_time, status, trigger_type, notes)
+    VALUES (?, NULL, 'ABSENT', 'AUTO', 'Not at destination by window end')
+  `);
+
+  const deleteByDateStmt = db.prepare(`
+    DELETE FROM attendance_log WHERE date = ?
   `);
 
   /**
@@ -209,8 +265,11 @@ function createDatabase(dbPath) {
   }
 
   /**
-   * Logs a check-in. By default, idempotent per calendar day: if an entry already exists
-   * for `date` and `overwrite` is not true, returns the existing record with `already_existed: true`.
+   * Logs an arrival (geofence entry or manual check-in). Idempotent per calendar day:
+   * - No record yet            -> insert with the computed status.
+   * - Auto-marked ABSENT       -> fill in the arrival (e.g. an offline-queued arrival that
+   *                               happened inside the window is upgraded to PRESENT).
+   * - Any other existing record -> left untouched (first arrival / explicit user choice wins).
    */
   function recordCheckIn({
     date,
@@ -220,27 +279,10 @@ function createDatabase(dbPath) {
     latitude = null,
     longitude = null,
     notes = null,
-    overwrite = false,
   }) {
     const existing = getAttendanceByDate(date);
-    if (existing && !overwrite) {
-      return {
-        record: existing,
-        already_existed: true,
-      };
-    }
 
-    if (overwrite) {
-      upsertCheckInStmt.run(
-        date,
-        checkInTime,
-        status,
-        triggerType,
-        latitude,
-        longitude,
-        notes
-      );
-    } else {
+    if (!existing) {
       insertCheckInStmt.run(
         date,
         checkInTime,
@@ -250,12 +292,48 @@ function createDatabase(dbPath) {
         longitude,
         notes
       );
+      return { record: getAttendanceByDate(date), already_existed: false };
     }
 
-    return {
-      record: getAttendanceByDate(date),
-      already_existed: false,
-    };
+    if (existing.trigger_type === 'AUTO') {
+      updateAutoAbsentStmt.run(
+        checkInTime,
+        status,
+        triggerType,
+        latitude,
+        longitude,
+        notes,
+        date
+      );
+      return { record: getAttendanceByDate(date), already_existed: false };
+    }
+
+    return { record: existing, already_existed: true };
+  }
+
+  /**
+   * Explicitly marks a day PRESENT or ABSENT from the calendar.
+   */
+  function setDayStatus({ date, status, checkInTime = null, notes = null }) {
+    upsertManualStmt.run(date, checkInTime, status, notes);
+    return getAttendanceByDate(date);
+  }
+
+  /**
+   * Removes any mark for a day so it shows as unmarked again.
+   */
+  function clearDay(date) {
+    const result = deleteByDateStmt.run(date);
+    return result.changes > 0;
+  }
+
+  /**
+   * Marks a day ABSENT only if nothing is recorded for it yet.
+   * @returns {boolean} true if a new ABSENT record was created
+   */
+  function markAbsentIfMissing(date) {
+    const result = insertAutoAbsentStmt.run(date);
+    return result.changes > 0;
   }
 
   function close() {
@@ -270,6 +348,9 @@ function createDatabase(dbPath) {
     getRecentAttendance,
     getMonthlyAttendance,
     recordCheckIn,
+    setDayStatus,
+    clearDay,
+    markAbsentIfMissing,
     close,
   };
 }

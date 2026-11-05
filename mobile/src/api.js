@@ -160,6 +160,17 @@ async function saveSettings(settings, deps = {}) {
   return res;
 }
 
+async function setDayAttendance(date, payload, deps = {}) {
+  return apiRequest(
+    `/api/attendance/${encodeURIComponent(date)}`,
+    {
+      method: 'PUT',
+      body: payload,
+    },
+    deps
+  );
+}
+
 /**
  * Offline Check-In Retry Queue:
  * Stores check-in payloads locally if network is unreachable when entering geofence,
@@ -258,6 +269,7 @@ module.exports = {
   submitCheckIn,
   fetchHistory,
   saveSettings,
+  setDayAttendance,
   getPendingCheckIns,
   enqueuePendingCheckIn,
   flushPendingCheckIns,

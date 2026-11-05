@@ -93,6 +93,26 @@ function createApp({
   clock = () => new Date(),
   webDistDir = path.join(__dirname, '..', '..', 'web', 'dist'),
 }) {
+  /**
+   * If today is a workday, the arrival window has closed, and nothing is recorded
+   * for today, mark today ABSENT. Safe to call repeatedly (idempotent).
+   */
+  function runAbsenceCheck() {
+    const settings = store.getSettings();
+    if (settings.work_latitude === 0 && settings.work_longitude === 0) {
+      return { marked: false, reason: 'location_not_configured' };
+    }
+    const localNow = getLocalDateTime(timezone, clock());
+    if (!settings.work_days.includes(localNow.dayOfWeek)) {
+      return { marked: false, reason: 'non_work_day' };
+    }
+    if (localNow.shortTime <= settings.window_end) {
+      return { marked: false, reason: 'window_open' };
+    }
+    const marked = store.markAbsentIfMissing(localNow.date);
+    return { marked, date: localNow.date };
+  }
+
   const requestHandler = async (req, res) => {
     try {
       // Handle CORS preflight
@@ -167,6 +187,7 @@ function createApp({
 
       // 1. GET /api/status
       if (req.method === 'GET' && pathname === '/api/status') {
+        runAbsenceCheck();
         const localNow = getLocalDateTime(timezone, clock());
         const settings = store.getSettings();
         const todayRecord = store.getAttendanceByDate(localNow.date);
@@ -178,9 +199,10 @@ function createApp({
             date: localNow.date,
             current_time: localNow.time,
             is_work_day: isWorkDay,
-            checked_in: Boolean(todayRecord),
-            check_in_time: todayRecord ? todayRecord.check_in_time : null,
+            window_closed: localNow.shortTime > settings.window_end,
             status: todayRecord ? todayRecord.status : null,
+            checked_in: Boolean(todayRecord && todayRecord.check_in_time),
+            check_in_time: todayRecord ? todayRecord.check_in_time : null,
             trigger_type: todayRecord ? todayRecord.trigger_type : null,
             notes: todayRecord ? todayRecord.notes : null,
           },
@@ -190,7 +212,7 @@ function createApp({
         return;
       }
 
-      // 2. POST /api/checkin
+      // 2. POST /api/checkin — logs an arrival (geofence entry or manual check-in)
       if (req.method === 'POST' && pathname === '/api/checkin') {
         let body;
         try {
@@ -203,6 +225,7 @@ function createApp({
         const localNow = getLocalDateTime(timezone, clock());
         const settings = store.getSettings();
 
+        // date/time are only sent when replaying an arrival queued offline on the phone
         const targetDate =
           body.date && DATE_REGEX.test(String(body.date))
             ? String(body.date)
@@ -213,7 +236,6 @@ function createApp({
               ? `${body.time}:00`
               : String(body.time)
             : localNow.time;
-        const shortTime = targetTime.slice(0, 5);
 
         const trigger =
           body.trigger && ['GEOFENCE', 'MANUAL'].includes(String(body.trigger).toUpperCase())
@@ -243,10 +265,8 @@ function createApp({
         }
 
         const computedStatus = evaluateAttendanceStatus({
-          shortTime,
-          windowStart: settings.window_start,
+          shortTime: targetTime.slice(0, 5),
           windowEnd: settings.window_end,
-          statusOverride: body.status ? String(body.status).toUpperCase() : undefined,
         });
 
         const result = store.recordCheckIn({
@@ -257,7 +277,6 @@ function createApp({
           latitude: hasCoords ? body.latitude : null,
           longitude: hasCoords ? body.longitude : null,
           notes: body.notes ? String(body.notes) : null,
-          overwrite: Boolean(body.overwrite),
         });
 
         sendJson(res, result.already_existed ? 200 : 201, {
@@ -276,6 +295,7 @@ function createApp({
 
       // 3. GET /api/history?month=YYYY-MM
       if (req.method === 'GET' && pathname === '/api/history') {
+        runAbsenceCheck();
         const localNow = getLocalDateTime(timezone, clock());
         const requestedMonth =
           parsedUrl.searchParams.get('month') || localNow.date.slice(0, 7);
@@ -289,10 +309,8 @@ function createApp({
 
         const records = store.getMonthlyAttendance(requestedMonth);
         const summary = {
-          total: records.length,
           present: records.filter((r) => r.status === 'PRESENT').length,
-          late: records.filter((r) => r.status === 'LATE').length,
-          manual: records.filter((r) => r.status === 'MANUAL').length,
+          absent: records.filter((r) => r.status === 'ABSENT').length,
         };
 
         sendJson(res, 200, {
@@ -303,7 +321,57 @@ function createApp({
         return;
       }
 
-      // 4. POST /api/settings (or PUT /api/settings)
+      // 4. PUT /api/attendance/YYYY-MM-DD — manually mark a day PRESENT / ABSENT, or clear it
+      const dayMatch = pathname.match(/^\/api\/attendance\/(\d{4}-\d{2}-\d{2})$/);
+      if (req.method === 'PUT' && dayMatch) {
+        const date = dayMatch[1];
+        if (!DATE_REGEX.test(date)) {
+          sendJson(res, 400, { error: 'Invalid date. Expected YYYY-MM-DD' });
+          return;
+        }
+
+        let body;
+        try {
+          body = await parseJsonBody(req);
+        } catch (err) {
+          sendJson(res, 400, { error: err.message });
+          return;
+        }
+
+        if (body.status === null) {
+          store.clearDay(date);
+          sendJson(res, 200, { success: true, date, record: null });
+          return;
+        }
+
+        const status = String(body.status || '').toUpperCase();
+        if (!['PRESENT', 'ABSENT'].includes(status)) {
+          sendJson(res, 400, {
+            error: "status must be 'PRESENT', 'ABSENT', or null to clear the day",
+          });
+          return;
+        }
+
+        let checkInTime = null;
+        if (body.time) {
+          if (!TIME_REGEX.test(String(body.time))) {
+            sendJson(res, 400, { error: 'time must be in HH:MM (24-hour) format' });
+            return;
+          }
+          checkInTime = `${body.time}:00`;
+        }
+
+        const notes =
+          typeof body.notes === 'string' && body.notes.trim()
+            ? body.notes.trim()
+            : null;
+
+        const record = store.setDayStatus({ date, status, checkInTime, notes });
+        sendJson(res, 200, { success: true, date, record });
+        return;
+      }
+
+      // 5. POST /api/settings (or PUT /api/settings)
       if (
         (req.method === 'POST' || req.method === 'PUT') &&
         pathname === '/api/settings'
@@ -387,6 +455,7 @@ function createApp({
   };
 
   const server = http.createServer(requestHandler);
+  server.runAbsenceCheck = runAbsenceCheck;
 
   /**
    * In-process HTTP request injection helper (similar to Fastify's server.inject)

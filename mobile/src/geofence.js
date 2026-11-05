@@ -155,8 +155,11 @@ async function processGeofenceEnterEvent(
           title:
             result.status === 'PRESENT'
               ? `Marked Present at ${placeName}`
-              : `Marked Late at ${placeName}`,
-          body: `Checked in automatically at ${formatTime12h(result.time)}.`,
+              : `Marked Absent at ${placeName}`,
+          body:
+            result.status === 'PRESENT'
+              ? `Checked in automatically at ${formatTime12h(result.time)}.`
+              : `Arrived at ${formatTime12h(result.time)} after window closed.`,
         },
         deps.Notifications
       );

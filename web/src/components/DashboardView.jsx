@@ -8,22 +8,26 @@ import {
   RefreshCw,
   AlertCircle,
   CalendarCheck,
+  XCircle,
 } from 'lucide-react';
-import { submitCheckIn, formatTime12h, formatDateReadable } from '../api';
+import {
+  submitCheckIn,
+  setDayAttendance,
+  formatTime12h,
+  formatDateReadable,
+} from '../api';
 
 function StatusBadge({ status }) {
-  const styles = {
-    PRESENT: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    LATE: 'bg-amber-100 text-amber-800 border-amber-200',
-    MANUAL: 'bg-sky-100 text-sky-800 border-sky-200',
-  };
+  const isPresent = status === 'PRESENT';
   return (
     <span
       className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-        styles[status] || 'bg-slate-100 text-slate-700 border-slate-200'
+        isPresent
+          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+          : 'bg-rose-100 text-rose-800 border-rose-200'
       }`}
     >
-      {status}
+      {status || 'UNMARKED'}
     </span>
   );
 }
@@ -35,7 +39,7 @@ export default function DashboardView({
   onNavigateSettings,
 }) {
   const [note, setNote] = useState('');
-  const [checkingIn, setCheckingIn] = useState(false);
+  const [acting, setActing] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
   if (loading && !statusData) {
@@ -56,8 +60,8 @@ export default function DashboardView({
     settings.work_latitude !== 0 || settings.work_longitude !== 0;
 
   async function handleManualCheckIn(e) {
-    e.preventDefault();
-    setCheckingIn(true);
+    if (e) e.preventDefault();
+    setActing(true);
     setFeedback(null);
 
     let coords = {};
@@ -89,7 +93,7 @@ export default function DashboardView({
       setFeedback({
         type: 'success',
         message: res.already_existed
-          ? `Already checked in today at ${formatTime12h(res.time)} (${res.status}).`
+          ? `Already marked for today (${res.status} at ${formatTime12h(res.time)}).`
           : `Checked in at ${formatTime12h(res.time)} — marked ${res.status}!`,
       });
       setNote('');
@@ -100,11 +104,36 @@ export default function DashboardView({
         message: err.message || 'Failed to check in.',
       });
     } finally {
-      setCheckingIn(false);
+      setActing(false);
     }
   }
 
-  // Determine Banner Visual State
+  async function handleMarkAbsentToday() {
+    if (!today.date) return;
+    setActing(true);
+    setFeedback(null);
+    try {
+      await setDayAttendance(today.date, {
+        status: 'ABSENT',
+        notes: note.trim() || 'Marked absent manually',
+      });
+      setFeedback({
+        type: 'success',
+        message: `Marked today (${today.date}) as ABSENT.`,
+      });
+      setNote('');
+      await onRefresh();
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message: err.message || 'Failed to mark absent.',
+      });
+    } finally {
+      setActing(false);
+    }
+  }
+
+  // Determine Banner Visual State: only PRESENT, ABSENT, or Awaiting/Non-work
   let bannerClasses =
     'bg-gradient-to-br from-indigo-600 to-blue-700 text-white shadow-indigo-200';
   let BannerIcon = Clock;
@@ -113,24 +142,22 @@ export default function DashboardView({
     settings.window_start
   )} – ${formatTime12h(settings.window_end)}`;
 
-  if (today.checked_in) {
-    if (today.status === 'LATE') {
-      bannerClasses =
-        'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-amber-200';
-      BannerIcon = Clock;
-      bannerTitle = `Marked Late at ${formatTime12h(today.check_in_time)}`;
-      bannerSubtitle = `Logged via ${today.trigger_type || 'GEOFENCE'} • ${
-        settings.work_name || 'Office'
-      }`;
-    } else {
-      bannerClasses =
-        'bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-emerald-200';
-      BannerIcon = CheckCircle2;
-      bannerTitle = `Marked Present at ${formatTime12h(today.check_in_time)}`;
-      bannerSubtitle = `Logged via ${today.trigger_type || 'GEOFENCE'} • ${
-        settings.work_name || 'Office'
-      }`;
-    }
+  if (today.status === 'PRESENT') {
+    bannerClasses =
+      'bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-emerald-200';
+    BannerIcon = CheckCircle2;
+    bannerTitle = `Marked Present at ${formatTime12h(today.check_in_time)}`;
+    bannerSubtitle = `Logged via ${today.trigger_type || 'GEOFENCE'} • ${
+      settings.work_name || 'Office'
+    }`;
+  } else if (today.status === 'ABSENT') {
+    bannerClasses =
+      'bg-gradient-to-br from-rose-600 to-red-700 text-white shadow-rose-200';
+    BannerIcon = XCircle;
+    bannerTitle = 'Marked Absent Today';
+    bannerSubtitle = today.check_in_time
+      ? `Arrived at ${formatTime12h(today.check_in_time)} (after window closed)`
+      : `Did not reach destination by ${formatTime12h(settings.window_end)}`;
   } else if (!today.is_work_day) {
     bannerClasses =
       'bg-gradient-to-br from-slate-600 to-slate-800 text-white shadow-slate-200';
@@ -214,43 +241,58 @@ export default function DashboardView({
         </div>
       </div>
 
-      {/* Quick Manual Check-In Card */}
+      {/* Quick Manual Actions Card */}
       <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="text-base font-semibold text-slate-900">
-              Quick Manual Check-In
+              Manual Day Actions
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Use this if your phone battery died or indoor GPS missed the boundary.
+              Check in manually if GPS was missed, or mark today as Absent (leave/sick day).
             </p>
           </div>
         </div>
 
         <form
           onSubmit={handleManualCheckIn}
-          className="flex flex-col sm:flex-row gap-3 mt-4"
+          className="space-y-3 mt-4"
         >
           <input
             type="text"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Optional note (e.g., Underground parking, forgot phone)"
-            disabled={today.checked_in || checkingIn}
-            className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none disabled:opacity-60"
+            placeholder="Optional note (e.g., Working remote, sick leave, underground parking)"
+            disabled={acting}
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none disabled:opacity-60"
           />
-          <button
-            type="submit"
-            disabled={today.checked_in || checkingIn}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none transition"
-          >
-            <Navigation className="h-4 w-4" />
-            {checkingIn
-              ? 'Checking In...'
-              : today.checked_in
-                ? 'Checked In Today'
-                : 'Manual Check In'}
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="submit"
+              disabled={acting || today.status === 'PRESENT'}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none transition"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {acting
+                ? 'Saving...'
+                : today.status === 'PRESENT'
+                  ? 'Marked Present Today'
+                  : 'Check In (Present)'}
+            </button>
+            <button
+              type="button"
+              onClick={handleMarkAbsentToday}
+              disabled={acting || today.status === 'ABSENT'}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none transition"
+            >
+              <XCircle className="h-4 w-4" />
+              {acting
+                ? 'Saving...'
+                : today.status === 'ABSENT'
+                  ? 'Marked Absent Today'
+                  : 'Mark Absent Today'}
+            </button>
+          </div>
         </form>
 
         {feedback && (

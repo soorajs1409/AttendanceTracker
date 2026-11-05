@@ -31,8 +31,23 @@ server.listen(PORT, '0.0.0.0', () => {
   );
 });
 
+// Auto-mark today ABSENT once the arrival window closes without an arrival
+function absenceTick() {
+  try {
+    const result = server.runAbsenceCheck();
+    if (result.marked) {
+      console.log(`Marked ${result.date} ABSENT (no arrival by window end)`);
+    }
+  } catch (err) {
+    console.error('Absence check failed:', err);
+  }
+}
+absenceTick();
+const absenceTimer = setInterval(absenceTick, 60 * 1000);
+
 function shutdown(signal) {
   console.log(`\nReceived ${signal}. Closing server and SQLite database...`);
+  clearInterval(absenceTimer);
   server.close(() => {
     store.close();
     process.exit(0);

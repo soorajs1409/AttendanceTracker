@@ -7,6 +7,7 @@ const {
   saveSettings,
   getPendingCheckIns,
   flushPendingCheckIns,
+  setDayAttendance,
 } = require('../src/api');
 const {
   GEOFENCE_TASK_NAME,
@@ -216,6 +217,53 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     const savedRecord = dbStore.getAttendanceByDate('2026-11-06');
     assert.equal(savedRecord.check_in_time, '09:25:15');
     assert.equal(savedRecord.status, 'PRESENT');
+  });
+
+  it('marks ABSENT on workday geofence entry after window has closed', async () => {
+    // Monday Nov 9, 2026 at 10:15 local (window ends at 10:00)
+    serverClock = new Date('2026-11-09T04:45:00.000Z');
+    const lateArrival = new Date(2026, 10, 9, 10, 15, 0);
+
+    const out = await processGeofenceEnterEvent(
+      { latitude: 12.9717, longitude: 77.5945, now: lateArrival },
+      {
+        storage: mobileStorage,
+        fetchImpl: fetchBridge,
+        Notifications: mockNotificationsModule,
+      }
+    );
+
+    assert.equal(out.skipped, false);
+    assert.equal(out.result.status, 'ABSENT');
+    const saved = dbStore.getAttendanceByDate('2026-11-09');
+    assert.equal(saved.status, 'ABSENT');
+    assert.equal(saved.check_in_time, '10:15:00');
+    assert.ok(notificationsSent[notificationsSent.length - 1].content.title.includes('Marked Absent'));
+  });
+
+  it('allows mobile setDayAttendance to manually mark ABSENT and unmark a day', async () => {
+    // Manually mark Nov 10 as ABSENT
+    const resAbsent = await setDayAttendance(
+      '2026-11-10',
+      { status: 'ABSENT', notes: 'Personal leave' },
+      { storage: mobileStorage, fetchImpl: fetchBridge }
+    );
+    assert.equal(resAbsent.success, true);
+    assert.equal(resAbsent.record.status, 'ABSENT');
+    let rec = dbStore.getAttendanceByDate('2026-11-10');
+    assert.equal(rec.status, 'ABSENT');
+    assert.equal(rec.notes, 'Personal leave');
+
+    // Unmark Nov 10 (status: null)
+    const resClear = await setDayAttendance(
+      '2026-11-10',
+      { status: null },
+      { storage: mobileStorage, fetchImpl: fetchBridge }
+    );
+    assert.equal(resClear.success, true);
+    assert.equal(resClear.record, null);
+    rec = dbStore.getAttendanceByDate('2026-11-10');
+    assert.equal(rec, null);
   });
 
   it('gracefully catches iOS Expo Go NSLocation*UsageDescription Info.plist error and falls back to live GPS geofencing', async () => {

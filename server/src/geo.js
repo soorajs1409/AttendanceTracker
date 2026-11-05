@@ -83,34 +83,18 @@ function getLocalDateTime(timezone = 'Asia/Kolkata', now = new Date()) {
 }
 
 /**
- * Evaluates whether a check-in time falls before/within the arrival window ('PRESENT')
- * or after the arrival window ('LATE').
+ * A day has exactly two possible states: 'PRESENT' or 'ABSENT'.
+ * The arrival time is only used to decide whether the destination was reached
+ * by the end of the arrival window.
  *
  * @param {object} params
- * @param {string} params.shortTime - 'HH:MM' in 24h format
- * @param {string} params.windowStart - 'HH:MM' in 24h format
- * @param {string} params.windowEnd - 'HH:MM' in 24h format
- * @param {string} [params.statusOverride] - Optional explicit status ('PRESENT' | 'LATE' | 'MANUAL')
- * @returns {'PRESENT' | 'LATE' | 'MANUAL'}
+ * @param {string} params.shortTime - Arrival time 'HH:MM' in 24h format
+ * @param {string} params.windowEnd - Window end 'HH:MM' in 24h format
+ * @returns {'PRESENT' | 'ABSENT'}
  */
-function evaluateAttendanceStatus({
-  shortTime,
-  windowStart,
-  windowEnd,
-  statusOverride,
-}) {
-  if (
-    statusOverride &&
-    ['PRESENT', 'LATE', 'MANUAL'].includes(statusOverride)
-  ) {
-    return statusOverride;
-  }
-
+function evaluateAttendanceStatus({ shortTime, windowEnd }) {
   // Lexicographical comparison works directly on zero-padded 'HH:MM' 24-hour strings
-  if (shortTime <= windowEnd) {
-    return 'PRESENT';
-  }
-  return 'LATE';
+  return shortTime <= windowEnd ? 'PRESENT' : 'ABSENT';
 }
 
 module.exports = {

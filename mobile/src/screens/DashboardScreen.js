@@ -13,6 +13,7 @@ const {
 const Location = require('expo-location');
 const {
   submitCheckIn,
+  setDayAttendance,
   flushPendingCheckIns,
   formatTime12h,
   formatDateReadable,
@@ -24,12 +25,9 @@ function StatusBadge({ status }) {
   if (status === 'PRESENT') {
     bg = '#d1fae5';
     fg = '#065f46';
-  } else if (status === 'LATE') {
-    bg = '#fef3c7';
-    fg = '#92400e';
-  } else if (status === 'MANUAL') {
-    bg = '#e0f2fe';
-    fg = '#075985';
+  } else if (status === 'ABSENT') {
+    bg = '#ffe4e6';
+    fg = '#9f1239';
   }
 
   return (
@@ -66,20 +64,18 @@ function DashboardScreen({
     settings.window_start
   )} – ${formatTime12h(settings.window_end)}`;
 
-  if (today.checked_in) {
-    if (today.status === 'LATE') {
-      bannerBg = '#d97706'; // Amber late
-      bannerTitle = `⏰ Marked Late at ${formatTime12h(today.check_in_time)}`;
-      bannerSub = `Logged via ${today.trigger_type || 'GEOFENCE'} • ${
-        settings.work_name || 'Office'
-      }`;
-    } else {
-      bannerBg = '#059669'; // Emerald present
-      bannerTitle = `✅ Marked Present at ${formatTime12h(today.check_in_time)}`;
-      bannerSub = `Logged via ${today.trigger_type || 'GEOFENCE'} • ${
-        settings.work_name || 'Office'
-      }`;
-    }
+  if (today.status === 'PRESENT') {
+    bannerBg = '#059669'; // Emerald present
+    bannerTitle = `✅ Marked Present at ${formatTime12h(today.check_in_time)}`;
+    bannerSub = `Logged via ${today.trigger_type || 'GEOFENCE'} • ${
+      settings.work_name || 'Office'
+    }`;
+  } else if (today.status === 'ABSENT') {
+    bannerBg = '#e11d48'; // Rose absent
+    bannerTitle = '❌ Marked Absent Today';
+    bannerSub = today.check_in_time
+      ? `Arrived at ${formatTime12h(today.check_in_time)} (after window closed)`
+      : `Did not reach destination by ${formatTime12h(settings.window_end)}`;
   } else if (today.is_work_day === false) {
     bannerBg = '#334155'; // Slate off-day
     bannerTitle = '🏖️ Non-Working Day';
@@ -116,7 +112,7 @@ function DashboardScreen({
       setFeedback({
         type: 'success',
         message: res.already_existed
-          ? `Already checked in today at ${formatTime12h(res.time)} (${res.status}).`
+          ? `Already recorded for today (${res.status} at ${formatTime12h(res.time)}).`
           : `Checked in at ${formatTime12h(res.time)} — marked ${res.status}!`,
       });
       setNote('');
@@ -125,6 +121,31 @@ function DashboardScreen({
       setFeedback({
         type: 'error',
         message: err.message || 'Failed to check in.',
+      });
+    } finally {
+      setCheckingIn(false);
+    }
+  }
+
+  async function handleMarkAbsentToday() {
+    if (!today.date) return;
+    setCheckingIn(true);
+    setFeedback(null);
+    try {
+      await setDayAttendance(today.date, {
+        status: 'ABSENT',
+        notes: note.trim() || 'Marked absent manually',
+      });
+      setFeedback({
+        type: 'success',
+        message: `Marked today (${today.date}) as ABSENT.`,
+      });
+      setNote('');
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message: err.message || 'Failed to mark absent.',
       });
     } finally {
       setCheckingIn(false);
@@ -217,38 +238,51 @@ function DashboardScreen({
         </View>
       </View>
 
-      {/* Quick Manual Check-In Card */}
+      {/* Manual Actions Card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Quick Manual Check-In</Text>
+        <Text style={styles.cardTitle}>Manual Actions</Text>
         <Text style={styles.cardSub}>
-          Use this if indoor GPS missed the boundary or you forgot your phone.
+          Check in present or mark absent if GPS was missed or you are taking time off.
         </Text>
 
         <TextInput
           style={styles.input}
           value={note}
           onChangeText={setNote}
-          placeholder="Optional note (e.g., Underground parking)"
+          placeholder="Optional note (e.g., Working remotely / Doctor appointment)"
           placeholderTextColor="#94a3b8"
-          editable={!today.checked_in && !checkingIn}
+          editable={!checkingIn}
         />
 
-        <TouchableOpacity
-          style={[
-            styles.primaryBtn,
-            (today.checked_in || checkingIn) && styles.disabledBtn,
-          ]}
-          onPress={handleManualCheckIn}
-          disabled={Boolean(today.checked_in) || checkingIn}
-        >
-          {checkingIn ? (
-            <ActivityIndicator color="#ffffff" size="small" />
-          ) : (
-            <Text style={styles.primaryBtnText}>
-              {today.checked_in ? 'Checked In Today' : 'Manual Check In'}
-            </Text>
-          )}
-        </TouchableOpacity>
+        <View style={styles.actionBtnRow}>
+          <TouchableOpacity
+            style={[
+              styles.primaryBtn,
+              { flex: 1 },
+              checkingIn && styles.disabledBtn,
+            ]}
+            onPress={handleManualCheckIn}
+            disabled={checkingIn}
+          >
+            {checkingIn ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : (
+              <Text style={styles.primaryBtnText}>Check In (Present)</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.absentBtn,
+              { flex: 1 },
+              checkingIn && styles.disabledBtn,
+            ]}
+            onPress={handleMarkAbsentToday}
+            disabled={checkingIn}
+          >
+            <Text style={styles.absentBtnText}>Mark Absent</Text>
+          </TouchableOpacity>
+        </View>
 
         {feedback && (
           <View
@@ -297,8 +331,10 @@ function DashboardScreen({
                   {formatDateReadable(item.date)}
                 </Text>
                 <Text style={styles.recentMeta} numberOfLines={1}>
-                  Arrived {formatTime12h(item.check_in_time)} •{' '}
-                  {item.trigger_type}
+                  {item.check_in_time
+                    ? `Arrived at ${formatTime12h(item.check_in_time)}`
+                    : 'No arrival time logged'}{' '}
+                  • {item.trigger_type || 'MANUAL'}
                   {item.notes ? ` — "${item.notes}"` : ''}
                 </Text>
               </View>
@@ -461,6 +497,10 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     marginBottom: 10,
   },
+  actionBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   primaryBtn: {
     backgroundColor: '#4f46e5',
     borderRadius: 12,
@@ -473,6 +513,20 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: {
     color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  absentBtn: {
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  absentBtnText: {
+    color: '#e11d48',
     fontSize: 14,
     fontWeight: '700',
   },

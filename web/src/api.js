@@ -78,6 +78,13 @@ export function saveSettings(settings) {
   });
 }
 
+export function setDayAttendance(date, payload) {
+  return apiRequest(`/api/attendance/${encodeURIComponent(date)}`, {
+    method: 'PUT',
+    body: payload,
+  });
+}
+
 /**
  * Formats 'HH:MM:SS' or 'HH:MM' into friendly 12-hour format (e.g. '09:14 AM').
  */

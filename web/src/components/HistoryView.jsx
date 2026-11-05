@@ -7,10 +7,12 @@ import {
   Clock,
   Edit3,
   Save,
+  Trash2,
+  XCircle,
 } from 'lucide-react';
 import {
   fetchHistory,
-  submitCheckIn,
+  setDayAttendance,
   formatTime12h,
   formatDateReadable,
 } from '../api';
@@ -33,15 +35,12 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
   const todayDateStr =
     statusData?.today?.date || new Date().toISOString().slice(0, 10);
   const defaultMonth = todayDateStr.slice(0, 7);
-  const workDays = statusData?.settings?.work_days || [1, 2, 3, 4, 5];
 
   const [month, setMonth] = useState(defaultMonth);
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState({
-    total: 0,
     present: 0,
-    late: 0,
-    manual: 0,
+    absent: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -60,7 +59,7 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
       const data = await fetchHistory(targetMonth);
       setRecords(data.records || []);
       setSummary(
-        data.summary || { total: 0, present: 0, late: 0, manual: 0 }
+        data.summary || { present: 0, absent: 0 }
       );
     } catch (err) {
       setError(err.message || 'Failed to load monthly attendance history.');
@@ -85,11 +84,11 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
     setSaveMessage(null);
     if (existing) {
       setEditNote(existing.notes || '');
-      setEditStatus(existing.status || 'PRESENT');
+      setEditStatus(existing.status === 'ABSENT' ? 'ABSENT' : 'PRESENT');
       setEditTime((existing.check_in_time || '09:00').slice(0, 5));
     } else {
       setEditNote('');
-      setEditStatus('MANUAL');
+      setEditStatus('PRESENT');
       setEditTime(statusData?.settings?.window_start || '09:00');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,46 +104,35 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
     calendarCells.push(null);
   }
 
-  let missedCount = 0;
   for (let day = 1; day <= daysInMonth; day += 1) {
     const dateStr = `${month}-${String(day).padStart(2, '0')}`;
     const dow = new Date(yearNum, monthNum - 1, day).getDay();
-    const isWorkDay = workDays.includes(dow);
     const rec = recordMap[dateStr] || null;
-    const isPast = dateStr < todayDateStr;
-    const isMissed = !rec && isWorkDay && isPast;
-    if (isMissed) missedCount += 1;
 
     calendarCells.push({
       day,
       dateStr,
       dow,
-      isWorkDay,
       rec,
-      isMissed,
       isToday: dateStr === todayDateStr,
-      isFuture: dateStr > todayDateStr,
     });
   }
 
   const selectedRecord = recordMap[selectedDate] || null;
 
   async function handleSaveDayRecord(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setSavingDay(true);
     setSaveMessage(null);
     try {
-      await submitCheckIn({
-        date: selectedDate,
-        time: editTime,
+      await setDayAttendance(selectedDate, {
         status: editStatus,
-        trigger: selectedRecord ? selectedRecord.trigger_type : 'MANUAL',
+        time: editStatus === 'PRESENT' ? editTime : null,
         notes: editNote.trim() || null,
-        overwrite: true,
       });
       setSaveMessage({
         type: 'success',
-        text: `Saved attendance record for ${selectedDate}.`,
+        text: `Marked ${selectedDate} as ${editStatus}.`,
       });
       await loadMonth(month);
       if (onRefreshStatus) await onRefreshStatus();
@@ -152,6 +140,27 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
       setSaveMessage({
         type: 'error',
         text: err.message || 'Failed to update date record.',
+      });
+    } finally {
+      setSavingDay(false);
+    }
+  }
+
+  async function handleClearDay() {
+    setSavingDay(true);
+    setSaveMessage(null);
+    try {
+      await setDayAttendance(selectedDate, { status: null });
+      setSaveMessage({
+        type: 'success',
+        text: `Cleared attendance mark for ${selectedDate}. Day is now unmarked.`,
+      });
+      await loadMonth(month);
+      if (onRefreshStatus) await onRefreshStatus();
+    } catch (err) {
+      setSaveMessage({
+        type: 'error',
+        text: err.message || 'Failed to clear day.',
       });
     } finally {
       setSavingDay(false);
@@ -171,7 +180,7 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
               {formatMonthLabel(month)}
             </h2>
             <p className="text-xs text-slate-500">
-              Tap any day to inspect arrival details or add a note
+              Only explicitly marked days show status. Unmarked days stay clean.
             </p>
           </div>
         </div>
@@ -206,29 +215,23 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
         </div>
       </div>
 
-      {/* Monthly Summary Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-2xl bg-white border border-slate-200/80 p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">On-Time Present</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-600">
+      {/* Two Summary Metrics: Present or Absent */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="rounded-2xl bg-white border border-slate-200/80 p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Present Days
+          </p>
+          <p className="mt-1 text-3xl font-extrabold text-emerald-600">
             {summary.present}
           </p>
         </div>
-        <div className="rounded-2xl bg-white border border-slate-200/80 p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Late Arrivals</p>
-          <p className="mt-1 text-2xl font-bold text-amber-600">
-            {summary.late}
+        <div className="rounded-2xl bg-white border border-slate-200/80 p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Absent Days
           </p>
-        </div>
-        <div className="rounded-2xl bg-white border border-slate-200/80 p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Manual Logs</p>
-          <p className="mt-1 text-2xl font-bold text-sky-600">
-            {summary.manual}
+          <p className="mt-1 text-3xl font-extrabold text-rose-600">
+            {summary.absent}
           </p>
-        </div>
-        <div className="rounded-2xl bg-white border border-slate-200/80 p-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500">Missed Workdays</p>
-          <p className="mt-1 text-2xl font-bold text-rose-600">{missedCount}</p>
         </div>
       </div>
 
@@ -261,30 +264,19 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
               }
 
               const isSelected = cell.dateStr === selectedDate;
-              let dotColor = 'bg-slate-300';
-              let cellBg = 'bg-slate-50/70 hover:bg-slate-100 text-slate-700';
+              let dotColor = null;
+              let cellBg = 'bg-slate-50/50 hover:bg-slate-100 text-slate-700';
 
               if (cell.rec) {
                 if (cell.rec.status === 'PRESENT') {
                   dotColor = 'bg-emerald-500';
                   cellBg =
                     'bg-emerald-50/70 hover:bg-emerald-100/80 text-emerald-950 border-emerald-200';
-                } else if (cell.rec.status === 'LATE') {
-                  dotColor = 'bg-amber-500';
+                } else if (cell.rec.status === 'ABSENT') {
+                  dotColor = 'bg-rose-500';
                   cellBg =
-                    'bg-amber-50/70 hover:bg-amber-100/80 text-amber-950 border-amber-200';
-                } else {
-                  dotColor = 'bg-sky-500';
-                  cellBg =
-                    'bg-sky-50/70 hover:bg-sky-100/80 text-sky-950 border-sky-200';
+                    'bg-rose-50/70 hover:bg-rose-100/80 text-rose-950 border-rose-200';
                 }
-              } else if (cell.isMissed) {
-                dotColor = 'bg-rose-500';
-                cellBg =
-                  'bg-rose-50/50 hover:bg-rose-100/70 text-rose-900 border-rose-200/70';
-              } else if (!cell.isWorkDay) {
-                dotColor = 'bg-slate-300';
-                cellBg = 'bg-slate-50/40 hover:bg-slate-100 text-slate-400';
               }
 
               return (
@@ -308,9 +300,11 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
                     {cell.day}
                   </span>
 
-                  <div className="flex flex-col items-center gap-0.5">
-                    <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-                    {cell.rec && (
+                  <div className="flex flex-col items-center gap-0.5 min-h-[14px]">
+                    {dotColor && (
+                      <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                    )}
+                    {cell.rec?.check_in_time && (
                       <span className="hidden sm:block text-[10px] font-medium opacity-75 leading-none">
                         {cell.rec.check_in_time.slice(0, 5)}
                       </span>
@@ -322,31 +316,23 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
           </div>
 
           {/* Legend */}
-          <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-4 text-xs text-slate-600">
+          <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-5 text-xs text-slate-600">
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
               Present
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-              Late
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
-              Manual
-            </span>
-            <span className="inline-flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-              Missed
+              Absent
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-              Off / Future
+            <span className="inline-flex items-center gap-1.5 text-slate-400">
+              <span className="h-2.5 w-2.5 rounded-full border border-slate-300 bg-transparent" />
+              Unmarked
             </span>
           </div>
         </div>
 
-        {/* Day Inspector & Note / Manual Override Panel */}
+        {/* Day Inspector & Manual Mark / Override Panel */}
         <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 shadow-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -367,55 +353,82 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
               <div className="mt-4 space-y-2.5 rounded-xl bg-slate-50 p-3.5 text-xs text-slate-700">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Status</span>
-                  <span className="font-bold text-slate-900">
+                  <span
+                    className={`font-bold px-2 py-0.5 rounded ${
+                      selectedRecord.status === 'PRESENT'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-rose-100 text-rose-800'
+                    }`}
+                  >
                     {selectedRecord.status}
                   </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Check-In Time</span>
-                  <span className="font-semibold inline-flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5 text-slate-400" />
-                    {formatTime12h(selectedRecord.check_in_time)}
-                  </span>
-                </div>
+                {selectedRecord.check_in_time && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Arrival Time</span>
+                    <span className="font-semibold inline-flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5 text-slate-400" />
+                      {formatTime12h(selectedRecord.check_in_time)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Source</span>
                   <span className="font-medium uppercase">
                     {selectedRecord.trigger_type}
                   </span>
                 </div>
+                {selectedRecord.notes && (
+                  <div className="pt-1 text-slate-600">
+                    <span className="text-slate-400">Note: </span>
+                    {selectedRecord.notes}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="mt-4 rounded-xl border border-dashed border-slate-200 p-4 text-xs text-slate-500">
-                No check-in logged for this date yet. You can record a manual entry or note below.
+                This day is currently unmarked. You can mark it Present or Absent below.
               </div>
             )}
 
-            {/* Edit / Manual Log Form */}
+            {/* Edit / Mark Form */}
             <form onSubmit={handleSaveDayRecord} className="mt-5 space-y-3.5">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
                 <Edit3 className="h-3.5 w-3.5 text-indigo-600" />
                 <span>
-                  {selectedRecord ? 'Update Entry / Note' : 'Log Manual Entry'}
+                  {selectedRecord ? 'Update Day Status' : 'Mark Day'}
                 </span>
               </div>
 
+              {/* Two Options: PRESENT or ABSENT */}
               <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-900 focus:border-indigo-500 focus:bg-white focus:outline-none"
-                  >
-                    <option value="PRESENT">PRESENT</option>
-                    <option value="LATE">LATE</option>
-                    <option value="MANUAL">MANUAL</option>
-                  </select>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditStatus('PRESENT')}
+                  className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border text-xs font-bold transition ${
+                    editStatus === 'PRESENT'
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>PRESENT</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditStatus('ABSENT')}
+                  className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border text-xs font-bold transition ${
+                    editStatus === 'ABSENT'
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <XCircle className="h-4 w-4" />
+                  <span>ABSENT</span>
+                </button>
+              </div>
 
+              {editStatus === 'PRESENT' && (
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">
                     Arrival Time
@@ -428,38 +441,44 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-900 focus:border-indigo-500 focus:bg-white focus:outline-none"
                   />
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Note
+                  Note (optional)
                 </label>
                 <textarea
                   rows={2}
                   value={editNote}
                   onChange={(e) => setEditNote(e.target.value)}
-                  placeholder="Add an optional note..."
+                  placeholder="e.g. Sick day, WFH, manual adjustment..."
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={savingDay}
-                className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60 transition"
-              >
-                {selectedRecord ? (
-                  <>
-                    <Save className="h-3.5 w-3.5" />
-                    {savingDay ? 'Saving...' : 'Save Changes'}
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    {savingDay ? 'Logging...' : 'Save Manual Entry'}
-                  </>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={savingDay}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60 transition"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>{savingDay ? 'Saving...' : 'Save Status'}</span>
+                </button>
+
+                {selectedRecord && (
+                  <button
+                    type="button"
+                    onClick={handleClearDay}
+                    disabled={savingDay}
+                    className="inline-flex items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-600 hover:bg-rose-50 hover:text-rose-600 transition"
+                    title="Unmark day"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Clear</span>
+                  </button>
                 )}
-              </button>
+              </div>
 
               {saveMessage && (
                 <p

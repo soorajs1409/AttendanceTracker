@@ -11,13 +11,13 @@ const {
 } = require('react-native');
 const {
   fetchHistory,
-  submitCheckIn,
+  setDayAttendance,
   formatTime12h,
   formatDateReadable,
 } = require('../api');
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const STATUS_OPTIONS = ['PRESENT', 'LATE', 'MANUAL'];
+const STATUS_OPTIONS = ['PRESENT', 'ABSENT'];
 
 function shiftMonth(monthStr, delta) {
   const [y, m] = monthStr.split('-').map(Number);
@@ -40,10 +40,8 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
   const [month, setMonth] = useState(defaultMonth);
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState({
-    total: 0,
     present: 0,
-    late: 0,
-    manual: 0,
+    absent: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -61,9 +59,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     try {
       const data = await fetchHistory(targetMonth);
       setRecords(data.records || []);
-      setSummary(
-        data.summary || { total: 0, present: 0, late: 0, manual: 0 }
-      );
+      setSummary(data.summary || { present: 0, absent: 0 });
     } catch (err) {
       setError(err.message || 'Failed to load monthly history.');
     } finally {
@@ -84,11 +80,11 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     const existing = recordMap[selectedDate];
     setSaveMsg(null);
     if (existing) {
-      setEditStatus(existing.status || 'PRESENT');
+      setEditStatus(existing.status === 'ABSENT' ? 'ABSENT' : 'PRESENT');
       setEditTime((existing.check_in_time || '09:00').slice(0, 5));
       setEditNote(existing.notes || '');
     } else {
-      setEditStatus('MANUAL');
+      setEditStatus('PRESENT');
       setEditTime(statusData?.settings?.window_start || '09:00');
       setEditNote('');
     }
@@ -104,22 +100,17 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     cells.push(null);
   }
 
-  let missedCount = 0;
   for (let day = 1; day <= daysInMonth; day += 1) {
     const dateStr = `${month}-${String(day).padStart(2, '0')}`;
     const dow = new Date(yearNum, monthNum - 1, day).getDay();
     const isWorkDay = workDays.includes(dow);
     const rec = recordMap[dateStr] || null;
-    const isPast = dateStr < todayDateStr;
-    const isMissed = !rec && isWorkDay && isPast;
-    if (isMissed) missedCount += 1;
 
     cells.push({
       day,
       dateStr,
       isWorkDay,
       rec,
-      isMissed,
       isToday: dateStr === todayDateStr,
     });
   }
@@ -140,17 +131,14 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     setSaving(true);
     setSaveMsg(null);
     try {
-      await submitCheckIn({
-        date: selectedDate,
-        time: editTime.trim() || '09:00',
+      await setDayAttendance(selectedDate, {
         status: editStatus,
-        trigger: selectedRecord ? selectedRecord.trigger_type : 'MANUAL',
+        time: editStatus === 'PRESENT' ? editTime : null,
         notes: editNote.trim() || null,
-        overwrite: true,
       });
       setSaveMsg({
         type: 'success',
-        text: `Saved attendance record for ${selectedDate}.`,
+        text: `Marked ${selectedDate} as ${editStatus}.`,
       });
       await loadMonth(month);
       if (onRefreshStatus) await onRefreshStatus();
@@ -164,14 +152,35 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     }
   }
 
+  async function handleClearDay() {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      await setDayAttendance(selectedDate, { status: null });
+      setSaveMsg({
+        type: 'success',
+        text: `Cleared attendance record for ${selectedDate}. Day is now unmarked.`,
+      });
+      await loadMonth(month);
+      if (onRefreshStatus) await onRefreshStatus();
+    } catch (err) {
+      setSaveMsg({
+        type: 'error',
+        text: err.message || 'Failed to clear entry.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Month Switcher Header */}
       <View style={styles.monthHeader}>
-        <View>
+        <View style={{ flex: 1, paddingRight: 8 }}>
           <Text style={styles.monthTitle}>{formatMonthLabel(month)}</Text>
           <Text style={styles.monthSub}>
-            Tap any date to view timestamp or log note
+            Only explicitly recorded days show dots. Tap any date to inspect.
           </Text>
         </View>
 
@@ -200,30 +209,18 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
         </View>
       </View>
 
-      {/* Summary Stats Row */}
+      {/* Summary Stats Row: Present & Absent only */}
       <View style={styles.statsGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Present</Text>
+          <Text style={styles.statLabel}>Present Days</Text>
           <Text style={[styles.statValue, { color: '#059669' }]}>
             {summary.present}
           </Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Late</Text>
-          <Text style={[styles.statValue, { color: '#d97706' }]}>
-            {summary.late}
-          </Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Manual</Text>
-          <Text style={[styles.statValue, { color: '#0284c7' }]}>
-            {summary.manual}
-          </Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Missed</Text>
+          <Text style={styles.statLabel}>Absent Days</Text>
           <Text style={[styles.statValue, { color: '#e11d48' }]}>
-            {missedCount}
+            {summary.absent}
           </Text>
         </View>
       </View>
@@ -253,27 +250,26 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
             <View key={`row-${rIdx}`} style={styles.weekRow}>
               {row.map((cell, cIdx) => {
                 if (!cell) {
-                  return <View key={`empty-${rIdx}-${cIdx}`} style={styles.dayCellEmpty} />;
+                  return (
+                    <View
+                      key={`empty-${rIdx}-${cIdx}`}
+                      style={styles.dayCellEmpty}
+                    />
+                  );
                 }
 
                 const isSelected = cell.dateStr === selectedDate;
-                let dotColor = '#cbd5e1';
+                let dotColor = null;
                 let cellBg = '#f8fafc';
 
                 if (cell.rec) {
                   if (cell.rec.status === 'PRESENT') {
                     dotColor = '#10b981';
                     cellBg = '#ecfdf5';
-                  } else if (cell.rec.status === 'LATE') {
-                    dotColor = '#f59e0b';
-                    cellBg = '#fffbeb';
-                  } else {
-                    dotColor = '#0ea5e9';
-                    cellBg = '#f0f9ff';
+                  } else if (cell.rec.status === 'ABSENT') {
+                    dotColor = '#f43f5e';
+                    cellBg = '#fff1f2';
                   }
-                } else if (cell.isMissed) {
-                  dotColor = '#f43f5e';
-                  cellBg = '#fff1f2';
                 }
 
                 return (
@@ -295,9 +291,13 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
                     >
                       {cell.day}
                     </Text>
-                    <View
-                      style={[styles.dot, { backgroundColor: dotColor }]}
-                    />
+                    {dotColor ? (
+                      <View
+                        style={[styles.dot, { backgroundColor: dotColor }]}
+                      />
+                    ) : (
+                      <View style={styles.dotPlaceholder} />
+                    )}
                   </TouchableOpacity>
                 );
               })}
@@ -312,16 +312,13 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
             <Text style={styles.legendText}>Present</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.dot, { backgroundColor: '#f59e0b' }]} />
-            <Text style={styles.legendText}>Late</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.dot, { backgroundColor: '#0ea5e9' }]} />
-            <Text style={styles.legendText}>Manual</Text>
-          </View>
-          <View style={styles.legendItem}>
             <View style={[styles.dot, { backgroundColor: '#f43f5e' }]} />
-            <Text style={styles.legendText}>Missed</Text>
+            <Text style={styles.legendText}>Absent</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <Text style={[styles.legendText, { color: '#94a3b8' }]}>
+              (Unmarked days stay clean)
+            </Text>
           </View>
         </View>
       </View>
@@ -339,39 +336,51 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
               <Text style={styles.detailKey}>Status</Text>
               <Text style={styles.detailVal}>{selectedRecord.status}</Text>
             </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailKey}>Check-In Time</Text>
-              <Text style={styles.detailVal}>
-                {formatTime12h(selectedRecord.check_in_time)}
-              </Text>
-            </View>
+            {selectedRecord.check_in_time ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailKey}>Check-In Time</Text>
+                <Text style={styles.detailVal}>
+                  {formatTime12h(selectedRecord.check_in_time)}
+                </Text>
+              </View>
+            ) : null}
             <View style={styles.detailRow}>
               <Text style={styles.detailKey}>Source</Text>
               <Text style={styles.detailVal}>
-                {selectedRecord.trigger_type}
+                {selectedRecord.trigger_type || 'MANUAL'}
               </Text>
             </View>
+            {selectedRecord.notes ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailKey}>Notes</Text>
+                <Text style={styles.detailVal}>{selectedRecord.notes}</Text>
+              </View>
+            ) : null}
           </View>
         ) : (
           <Text style={styles.noRecordText}>
-            No check-in logged for this date yet. You can record a manual entry below.
+            No attendance recorded for this date (unmarked).
           </Text>
         )}
 
         <Text style={styles.formSectionLabel}>
-          {selectedRecord ? 'Update Entry / Note' : 'Log Manual Entry'}
+          {selectedRecord ? 'Update Day Record' : 'Record Day Attendance'}
         </Text>
 
-        {/* Status Selector Pills */}
+        {/* Status Selector Pills: PRESENT vs ABSENT */}
         <View style={styles.statusSelectorRow}>
           {STATUS_OPTIONS.map((opt) => {
             const active = editStatus === opt;
+            const isPresent = opt === 'PRESENT';
             return (
               <TouchableOpacity
                 key={opt}
                 style={[
                   styles.statusOptBtn,
-                  active && styles.statusOptBtnActive,
+                  active &&
+                    (isPresent
+                      ? styles.statusOptBtnActiveGreen
+                      : styles.statusOptBtnActiveRose),
                 ]}
                 onPress={() => setEditStatus(opt)}
               >
@@ -388,16 +397,20 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
           })}
         </View>
 
-        <Text style={styles.inputLabel}>Arrival Time (24h HH:MM)</Text>
-        <TextInput
-          style={styles.input}
-          value={editTime}
-          onChangeText={setEditTime}
-          placeholder="09:00"
-          placeholderTextColor="#94a3b8"
-        />
+        {editStatus === 'PRESENT' && (
+          <>
+            <Text style={styles.inputLabel}>Arrival Time (24h HH:MM)</Text>
+            <TextInput
+              style={styles.input}
+              value={editTime}
+              onChangeText={setEditTime}
+              placeholder="09:00"
+              placeholderTextColor="#94a3b8"
+            />
+          </>
+        )}
 
-        <Text style={styles.inputLabel}>Note</Text>
+        <Text style={styles.inputLabel}>Note (Optional)</Text>
         <TextInput
           style={[styles.input, { minHeight: 56 }]}
           value={editNote}
@@ -407,19 +420,31 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
           multiline
         />
 
-        <TouchableOpacity
-          style={styles.saveBtn}
-          onPress={handleSaveDay}
-          disabled={saving}
-        >
-          <Text style={styles.saveBtnText}>
-            {saving
-              ? 'Saving...'
-              : selectedRecord
-                ? 'Save Changes'
-                : 'Save Manual Entry'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.buttonStack}>
+          <TouchableOpacity
+            style={styles.saveBtn}
+            onPress={handleSaveDay}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : (
+              <Text style={styles.saveBtnText}>
+                {selectedRecord ? 'Save Changes' : `Mark as ${editStatus}`}
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          {selectedRecord ? (
+            <TouchableOpacity
+              style={styles.clearBtn}
+              onPress={handleClearDay}
+              disabled={saving}
+            >
+              <Text style={styles.clearBtnText}>Clear (Unmark Day)</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
         {saveMsg && (
           <Text
@@ -501,13 +526,13 @@ const styles = StyleSheet.create({
   },
   statsGrid: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12,
   },
   statCard: {
     flex: 1,
     backgroundColor: '#ffffff',
     borderRadius: 14,
-    padding: 12,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
@@ -517,9 +542,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   statValue: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '800',
-    marginTop: 2,
+    marginTop: 4,
   },
   errorBox: {
     backgroundColor: '#fff1f2',
@@ -583,9 +608,13 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   dot: {
-    width: 7,
-    height: 7,
+    width: 6,
+    height: 6,
     borderRadius: 999,
+  },
+  dotPlaceholder: {
+    width: 6,
+    height: 6,
   },
   legendRow: {
     marginTop: 12,
@@ -594,6 +623,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#f1f5f9',
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 14,
   },
   legendItem: {
@@ -656,19 +686,23 @@ const styles = StyleSheet.create({
   },
   statusOptBtn: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     backgroundColor: '#f8fafc',
     alignItems: 'center',
   },
-  statusOptBtnActive: {
-    backgroundColor: '#4f46e5',
-    borderColor: '#4f46e5',
+  statusOptBtnActiveGreen: {
+    backgroundColor: '#059669',
+    borderColor: '#059669',
+  },
+  statusOptBtnActiveRose: {
+    backgroundColor: '#e11d48',
+    borderColor: '#e11d48',
   },
   statusOptText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     color: '#475569',
   },
@@ -692,16 +726,34 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     marginBottom: 10,
   },
+  buttonStack: {
+    gap: 8,
+    marginTop: 4,
+  },
   saveBtn: {
     backgroundColor: '#4f46e5',
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   saveBtnText: {
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '700',
+  },
+  clearBtn: {
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  clearBtnText: {
+    color: '#475569',
+    fontSize: 13,
+    fontWeight: '600',
   },
   saveMsgText: {
     fontSize: 12,
