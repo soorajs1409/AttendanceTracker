@@ -214,4 +214,14 @@ describe('Attendance Tracker — Stage 1 Lean Backend & SQLite Tests', () => {
     assert.equal(data.records[0].date, '2026-11-05');
     assert.equal(data.records[1].date, '2026-11-06');
   });
+
+  it('GET / serves the compiled Web Portal SPA when web/dist exists', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/',
+    });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.ok(html.includes('<title>Attendance Tracker</title>'));
+  });
 });

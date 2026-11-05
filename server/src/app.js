@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const http = require('node:http');
 const { Readable } = require('node:stream');
 const crypto = require('node:crypto');
@@ -7,6 +9,16 @@ const {
   getLocalDateTime,
   evaluateAttendanceStatus,
 } = require('./geo');
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+};
 
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const MONTH_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -79,6 +91,7 @@ function createApp({
   apiKey = process.env.API_KEY || '',
   timezone = process.env.TIMEZONE || 'Asia/Kolkata',
   clock = () => new Date(),
+  webDistDir = path.join(__dirname, '..', '..', 'web', 'dist'),
 }) {
   const requestHandler = async (req, res) => {
     try {
@@ -96,6 +109,36 @@ function createApp({
 
       const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const pathname = parsedUrl.pathname;
+
+      // Serve static Web Portal assets & SPA fallback for non-/api GET routes
+      if (
+        req.method === 'GET' &&
+        !pathname.startsWith('/api') &&
+        webDistDir &&
+        fs.existsSync(path.join(webDistDir, 'index.html'))
+      ) {
+        const relativeTarget =
+          pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+        const candidatePath = path.resolve(webDistDir, relativeTarget);
+        const rootResolved = path.resolve(webDistDir);
+
+        // Guard against directory traversal
+        if (candidatePath.startsWith(rootResolved)) {
+          let fileToServe = candidatePath;
+          if (
+            !fs.existsSync(fileToServe) ||
+            fs.statSync(fileToServe).isDirectory()
+          ) {
+            fileToServe = path.join(rootResolved, 'index.html');
+          }
+          const ext = path.extname(fileToServe).toLowerCase();
+          const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+          const content = fs.readFileSync(fileToServe);
+          res.writeHead(200, { 'Content-Type': contentType });
+          res.end(content);
+          return;
+        }
+      }
 
       // Public healthcheck route (no API key required for container health probes)
       if (req.method === 'GET' && pathname === '/api/health') {
