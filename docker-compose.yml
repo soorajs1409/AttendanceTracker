@@ -1,0 +1,163 @@
+# ==============================================================================
+# AttendanceTracker - Production Docker Compose Specification
+# ==============================================================================
+# Architecture: Single lightweight Node.js 20 Alpine container hosting Fastify API
+# and pre-compiled React Web SPA, with optional profile-based reverse proxy,
+# tunneling, and continuous backup replication services.
+#
+# Profiles:
+#   - default (no profile): Starts core attendance-tracker service
+#   - homelab / tunnel:    Starts attendance-tracker + Cloudflare Tunnel (cloudflared)
+#   - vps / proxy:         Starts attendance-tracker + Caddy reverse proxy (auto TLS + HTTP/3)
+#   - litestream / backup: Starts attendance-tracker + Litestream S3 WAL replication
+#
+# Quickstart Examples:
+#   Core only:                 docker compose up -d
+#   Homelab (Cloudflare):      docker compose --profile homelab up -d
+#   VPS (Caddy auto-TLS):      docker compose --profile vps up -d
+#   Homelab + Litestream:      docker compose --profile homelab --profile litestream up -d
+# ==============================================================================
+
+services:
+  attendance-tracker:
+    image: attendance-tracker:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: attendance-tracker
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DATABASE_PATH=/data/attendance.db
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET must be set in .env}
+      - API_BEARER_TOKEN=${API_BEARER_TOKEN:?API_BEARER_TOKEN must be set in .env}
+      - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-UTC}
+      - EXPO_ACCESS_TOKEN=${EXPO_ACCESS_TOKEN:-}
+      - NTFY_URL=${NTFY_URL:-}
+      - NTFY_TOKEN=${NTFY_TOKEN:-}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+    volumes:
+      # SQLite WAL requires local host volume mounts; NEVER mount over NFS/SMB
+      - ./data:/data
+      - ./backups:/backups
+    ports:
+      # Bound to localhost interface; exposed externally via Caddy or Cloudflare Tunnel
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - attendance-internal
+
+  # ----------------------------------------------------------------------------
+  # Homelab Zero-Port-Forwarding Outbound Tunnel (Cloudflare)
+  # Activated with: docker compose --profile homelab up -d
+  # ----------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: attendance-cloudflared
+    restart: unless-stopped
+    profiles:
+      - homelab
+      - tunnel
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN is required for homelab profile}
+    depends_on:
+      attendance-tracker:
+        condition: service_healthy
+    networks:
+      - attendance-internal
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # ----------------------------------------------------------------------------
+  # VPS Reverse Proxy with Automated ACME TLS (Let's Encrypt) & HTTP/3
+  # Activated with: docker compose --profile vps up -d
+  # ----------------------------------------------------------------------------
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: attendance-caddy
+    restart: unless-stopped
+    profiles:
+      - vps
+      - proxy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      attendance-tracker:
+        condition: service_healthy
+    networks:
+      - attendance-internal
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Continuous Real-Time SQLite WAL Replication to S3 / Object Storage
+  # Activated with: docker compose --profile litestream up -d
+  # ----------------------------------------------------------------------------
+  litestream:
+    image: litestream/litestream:0.3.13
+    container_name: attendance-litestream
+    restart: unless-stopped
+    profiles:
+      - litestream
+      - backup
+    command: replicate -config /etc/litestream.yml
+    environment:
+      - LITESTREAM_ACCESS_KEY_ID=${LITESTREAM_ACCESS_KEY_ID:-}
+      - LITESTREAM_SECRET_ACCESS_KEY=${LITESTREAM_SECRET_ACCESS_KEY:-}
+    volumes:
+      - ./litestream.yml:/etc/litestream.yml:ro
+      - ./data:/data:ro
+    depends_on:
+      attendance-tracker:
+        condition: service_healthy
+    networks:
+      - attendance-internal
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  caddy_data:
+    name: attendance_caddy_data
+  caddy_config:
+    name: attendance_caddy_config
+
+networks:
+  attendance-internal:
+    name: attendance_internal_network
+    driver: bridge
