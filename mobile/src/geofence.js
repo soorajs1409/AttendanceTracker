@@ -7,6 +7,25 @@ const {
 
 const GEOFENCE_TASK_NAME = 'WORK_ATTENDANCE_TASK';
 const WORK_REGION_IDENTIFIER = 'work-location';
+const EARTH_RADIUS_METERS = 6371000;
+
+// Active foreground GPS watcher fallback for Expo Go on iOS (where Info.plist lacks Always key)
+let activeLiveWatcher = null;
+let liveWatcherTriggeredDate = null;
+
+function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(EARTH_RADIUS_METERS * c * 10) / 10;
+}
 
 /**
  * Extracts local YYYY-MM-DD, HH:MM:SS, HH:MM, and day-of-week (0=Sun..6=Sat)
@@ -62,7 +81,8 @@ async function sendLocalNotification(
 ) {
   try {
     const Notifications =
-      notificationsModule || getDefaultNativeModules().Notifications;
+      notificationsModule ||
+      getDefaultNativeModules({ needNotifications: true }).Notifications;
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
@@ -72,16 +92,21 @@ async function sendLocalNotification(
       trigger: null, // Immediate local notification
     });
   } catch {
-    // Ignore notification errors if user disabled notifications
+    // Ignore notification errors if user disabled notifications or in Expo Go
   }
 }
 
 /**
  * Core handler invoked when the OS detects entry into the workplace geofence
- * (or when triggered via the 'Simulate Geofence Entry' test button).
+ * (or when triggered via the 'Simulate Geofence Entry' test button or live GPS watcher).
  */
 async function processGeofenceEnterEvent(
-  { latitude = null, longitude = null, now = new Date(), bypassScheduleGuard = false } = {},
+  {
+    latitude = null,
+    longitude = null,
+    now = new Date(),
+    bypassScheduleGuard = false,
+  } = {},
   deps = {}
 ) {
   const local = getDeviceLocalParts(now);
@@ -177,11 +202,15 @@ async function processGeofenceEnterEvent(
  */
 function registerBackgroundGeofenceTask(deps = {}) {
   const { Location, TaskManager, Notifications } = {
-    ...getDefaultNativeModules(deps),
+    ...getDefaultNativeModules({
+      ...deps,
+      needTaskManager: true,
+      needNotifications: true,
+    }),
     ...deps,
   };
 
-  if (TaskManager.isTaskDefined(GEOFENCE_TASK_NAME)) {
+  if (!TaskManager || TaskManager.isTaskDefined(GEOFENCE_TASK_NAME)) {
     return;
   }
 
@@ -207,8 +236,63 @@ function registerBackgroundGeofenceTask(deps = {}) {
 }
 
 /**
- * Requests OS foreground + background location permissions and registers
- * the single circular geofence around the configured workplace.
+ * Starts a foreground GPS boundary watcher (`watchPositionAsync`) as a seamless fallback
+ * when running inside Expo Go on iOS (where Apple's App Store Expo Go binary does not include
+ * the background `NSLocationAlwaysAndWhenInUseUsageDescription` Info.plist key).
+ */
+async function startLiveForegroundGeofenceWatcher(
+  { targetLat, targetLng, radius },
+  deps = {}
+) {
+  const { Location, Notifications } = {
+    ...getDefaultNativeModules(deps),
+    ...deps,
+  };
+
+  if (activeLiveWatcher && typeof activeLiveWatcher.remove === 'function') {
+    activeLiveWatcher.remove();
+    activeLiveWatcher = null;
+  }
+
+  if (typeof Location.watchPositionAsync !== 'function') {
+    return false;
+  }
+
+  activeLiveWatcher = await Location.watchPositionAsync(
+    {
+      accuracy: Location.Accuracy ? Location.Accuracy.Balanced : 3,
+      timeInterval: 10000,
+      distanceInterval: 10,
+    },
+    async (pos) => {
+      const lat = pos?.coords?.latitude;
+      const lng = pos?.coords?.longitude;
+      if (typeof lat !== 'number' || typeof lng !== 'number') return;
+
+      const dist = calculateDistanceMeters(lat, lng, targetLat, targetLng);
+      const todayDate = getDeviceLocalParts(new Date()).date;
+
+      if (dist <= radius && liveWatcherTriggeredDate !== todayDate) {
+        liveWatcherTriggeredDate = todayDate;
+        await processGeofenceEnterEvent(
+          {
+            latitude: lat,
+            longitude: lng,
+            now: new Date(),
+          },
+          { ...deps, Notifications }
+        );
+      }
+    }
+  );
+
+  return true;
+}
+
+/**
+ * Requests OS location permissions and registers the workplace geofence.
+ * Automatically falls back to Live GPS Geofence Monitoring in Expo Go on iOS
+ * if `NSLocationAlwaysAndWhenInUseUsageDescription` is absent in the host binary's Info.plist.
  */
 async function syncGeofenceRegistration(settings, deps = {}) {
   const { Location, Notifications } = {
@@ -227,47 +311,95 @@ async function syncGeofenceRegistration(settings, deps = {}) {
     };
   }
 
-  const fg = await Location.requestForegroundPermissionsAsync();
-  if (fg.status !== 'granted') {
+  const targetLat = Number(settings.work_latitude);
+  const targetLng = Number(settings.work_longitude);
+  const radius = Math.max(50, Number(settings.radius_meters) || 100);
+
+  // 1. Request Foreground ("When In Use") Permission
+  let fg;
+  try {
+    fg = await Location.requestForegroundPermissionsAsync();
+  } catch (err) {
+    return {
+      active: false,
+      reason: `Location permission error: ${err?.message || err}`,
+    };
+  }
+
+  if (fg?.status !== 'granted') {
     return {
       active: false,
       reason: 'Foreground location permission denied.',
     };
   }
 
-  const bg = await Location.requestBackgroundPermissionsAsync();
-  if (bg.status !== 'granted') {
+  if (
+    Notifications &&
+    typeof Notifications.requestPermissionsAsync === 'function'
+  ) {
+    try {
+      await Notifications.requestPermissionsAsync();
+    } catch {
+      // Non-fatal if notifications permission is declined
+    }
+  }
+
+  // 2. Try Native Background Geofencing (works in Dev Builds, Standalone Apps & Android)
+  try {
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    if (bg?.status === 'granted') {
+      await Location.startGeofencingAsync(GEOFENCE_TASK_NAME, [
+        {
+          identifier: WORK_REGION_IDENTIFIER,
+          latitude: targetLat,
+          longitude: targetLng,
+          radius,
+          notifyOnEnter: true,
+          notifyOnExit: false,
+        },
+      ]);
+
+      return {
+        active: true,
+        mode: 'native_background',
+        radius,
+        latitude: targetLat,
+        longitude: targetLng,
+      };
+    }
+  } catch {
+    // In Expo Go on iOS, requestBackgroundPermissionsAsync rejects with ERR_LOCATION_INFO_PLIST
+    // because the store Expo Go binary only includes WhenInUse in Info.plist.
+    // Fall through to Live Foreground Geofence Watcher below!
+  }
+
+  // 3. Fallback: Live GPS Boundary Watcher (works inside Expo Go on iOS!)
+  try {
+    const startedLive = await startLiveForegroundGeofenceWatcher(
+      { targetLat, targetLng, radius },
+      deps
+    );
+    if (startedLive) {
+      return {
+        active: true,
+        mode: 'expo_go_live',
+        radius,
+        latitude: targetLat,
+        longitude: targetLng,
+        note: 'Armed in Expo Go Live GPS mode (auto check-in active while app is open).',
+      };
+    }
+  } catch (err) {
     return {
       active: false,
-      reason:
-        'Background ("Always Allow") location permission is required for automatic check-ins.',
+      reason: err?.message || 'Could not start geofence watcher.',
     };
   }
 
-  try {
-    await Notifications.requestPermissionsAsync();
-  } catch {
-    // Non-fatal if notifications permission is declined
-  }
-
-  const radius = Math.max(50, Number(settings.radius_meters) || 100);
-
-  await Location.startGeofencingAsync(GEOFENCE_TASK_NAME, [
-    {
-      identifier: WORK_REGION_IDENTIFIER,
-      latitude: Number(settings.work_latitude),
-      longitude: Number(settings.work_longitude),
-      radius,
-      notifyOnEnter: true,
-      notifyOnExit: false,
-    },
-  ]);
-
   return {
-    active: true,
-    radius,
-    latitude: Number(settings.work_latitude),
-    longitude: Number(settings.work_longitude),
+    active: false,
+    reason:
+      'Background ("Always Allow") location permission is required for background check-ins.',
   };
 }
 
@@ -276,10 +408,21 @@ async function stopGeofenceRegistration(deps = {}) {
     ...getDefaultNativeModules(deps),
     ...deps,
   };
-  const started = await Location.hasStartedGeofencingAsync(GEOFENCE_TASK_NAME);
-  if (started) {
-    await Location.stopGeofencingAsync(GEOFENCE_TASK_NAME);
+
+  if (activeLiveWatcher && typeof activeLiveWatcher.remove === 'function') {
+    activeLiveWatcher.remove();
+    activeLiveWatcher = null;
   }
+
+  try {
+    const started = await Location.hasStartedGeofencingAsync(GEOFENCE_TASK_NAME);
+    if (started) {
+      await Location.stopGeofencingAsync(GEOFENCE_TASK_NAME);
+    }
+  } catch {
+    // Ignore if not supported in Expo Go
+  }
+
   return { active: false };
 }
 
@@ -288,29 +431,51 @@ async function getGeofenceStatus(deps = {}) {
     ...getDefaultNativeModules(deps),
     ...deps,
   };
+
+  let fgGranted = false;
+  let bgGranted = false;
+  let nativeStarted = false;
+
   try {
-    const [fg, bg, started] = await Promise.all([
-      Location.getForegroundPermissionsAsync(),
-      Location.getBackgroundPermissionsAsync(),
-      Location.hasStartedGeofencingAsync(GEOFENCE_TASK_NAME),
-    ]);
-    return {
-      active: Boolean(started),
-      foregroundGranted: fg.status === 'granted',
-      backgroundGranted: bg.status === 'granted',
-    };
+    const fg = await Location.getForegroundPermissionsAsync();
+    fgGranted = fg?.status === 'granted';
   } catch {
-    return {
-      active: false,
-      foregroundGranted: false,
-      backgroundGranted: false,
-    };
+    fgGranted = false;
   }
+
+  try {
+    const bg = await Location.getBackgroundPermissionsAsync();
+    bgGranted = bg?.status === 'granted';
+  } catch {
+    bgGranted = false;
+  }
+
+  try {
+    nativeStarted = Boolean(
+      await Location.hasStartedGeofencingAsync(GEOFENCE_TASK_NAME)
+    );
+  } catch {
+    nativeStarted = false;
+  }
+
+  const liveActive = Boolean(activeLiveWatcher);
+
+  return {
+    active: nativeStarted || liveActive,
+    mode: nativeStarted
+      ? 'native_background'
+      : liveActive
+        ? 'expo_go_live'
+        : 'inactive',
+    foregroundGranted: fgGranted,
+    backgroundGranted: bgGranted,
+  };
 }
 
 module.exports = {
   GEOFENCE_TASK_NAME,
   WORK_REGION_IDENTIFIER,
+  calculateDistanceMeters,
   getDeviceLocalParts,
   processGeofenceEnterEvent,
   registerBackgroundGeofenceTask,

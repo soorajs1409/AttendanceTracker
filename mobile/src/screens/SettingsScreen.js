@@ -170,8 +170,10 @@ function SettingsScreen({
       setSettingsMsg({
         type: 'success',
         text: geoRes.active
-          ? `Saved & armed OS geofence (${geoRes.radius}m radius)!`
-          : `Saved to server! (${geoRes.reason || 'Enable Always Location to arm geofence'})`,
+          ? geoRes.mode === 'expo_go_live'
+            ? `Saved & armed Live GPS Geofence (${geoRes.radius}m)!`
+            : `Saved & armed OS geofence (${geoRes.radius}m radius)!`
+          : `Saved to server! (${geoRes.reason || 'Grant location permission to arm geofence'})`,
       });
     } catch (err) {
       setSettingsMsg({
@@ -185,27 +187,43 @@ function SettingsScreen({
 
   async function handleArmGeofence() {
     setGeoMsg(null);
-    const res = await syncGeofenceRegistration({
-      work_latitude: Number(latitude),
-      work_longitude: Number(longitude),
-      radius_meters: Number(radiusMeters),
-    });
-    if (onRefreshGeofence) await onRefreshGeofence();
-    setGeoMsg({
-      type: res.active ? 'success' : 'error',
-      text: res.active
-        ? `OS circular geofence armed (${res.radius}m)!`
-        : res.reason || 'Could not arm geofence.',
-    });
+    try {
+      const res = await syncGeofenceRegistration({
+        work_latitude: Number(latitude),
+        work_longitude: Number(longitude),
+        radius_meters: Number(radiusMeters),
+      });
+      if (onRefreshGeofence) await onRefreshGeofence();
+      setGeoMsg({
+        type: res.active ? 'success' : 'error',
+        text: res.active
+          ? res.mode === 'expo_go_live'
+            ? `Armed in Expo Go Live GPS mode (${res.radius}m radius)!`
+            : `OS circular geofence armed (${res.radius}m)!`
+          : res.reason || 'Could not arm geofence.',
+      });
+    } catch (err) {
+      setGeoMsg({
+        type: 'error',
+        text: err?.message || 'Failed to arm geofence.',
+      });
+    }
   }
 
   async function handlePauseGeofence() {
-    await stopGeofenceRegistration();
-    if (onRefreshGeofence) await onRefreshGeofence();
-    setGeoMsg({
-      type: 'success',
-      text: 'Background geofencing paused on this device.',
-    });
+    try {
+      await stopGeofenceRegistration();
+      if (onRefreshGeofence) await onRefreshGeofence();
+      setGeoMsg({
+        type: 'success',
+        text: 'Geofencing paused on this device.',
+      });
+    } catch (err) {
+      setGeoMsg({
+        type: 'error',
+        text: err?.message || 'Failed to pause geofence.',
+      });
+    }
   }
 
   async function handleSimulateEnter() {
@@ -266,9 +284,9 @@ function SettingsScreen({
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Background Geofencing Engine Card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🛰️ Background Geofencing</Text>
+        <Text style={styles.cardTitle}>🛰️ Geofencing Engine</Text>
         <Text style={styles.cardSub}>
-          Uses native iOS CoreLocation / Android GeofenceManager for near-zero battery drain.
+          Uses OS background regions in standalone builds, with automatic Live GPS fallback inside Expo Go.
         </Text>
 
         <View style={styles.permStatusBox}>
@@ -280,12 +298,20 @@ function SettingsScreen({
                 color: geofenceState?.active ? '#059669' : '#d97706',
               }}
             >
-              {geofenceState?.active ? 'ARMED & MONITORING' : 'INACTIVE'}
+              {geofenceState?.active
+                ? geofenceState?.mode === 'expo_go_live'
+                  ? 'ARMED (Expo Go Live GPS)'
+                  : 'ARMED (OS Background)'
+                : 'INACTIVE'}
             </Text>
           </Text>
           <Text style={styles.permLine}>
-            Always Location Permission:{' '}
-            {geofenceState?.backgroundGranted ? 'Granted ✅' : 'Not Granted ⚠️'}
+            Location Permission:{' '}
+            {geofenceState?.backgroundGranted
+              ? 'Always Allowed ✅'
+              : geofenceState?.foregroundGranted
+                ? 'While Using App (Expo Go) ✅'
+                : 'Not Granted ⚠️'}
           </Text>
         </View>
 

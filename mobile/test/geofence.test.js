@@ -217,4 +217,39 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     assert.equal(savedRecord.check_in_time, '09:25:15');
     assert.equal(savedRecord.status, 'PRESENT');
   });
+
+  it('gracefully catches iOS Expo Go NSLocation*UsageDescription Info.plist error and falls back to live GPS geofencing', async () => {
+    let watchCallback = null;
+    const expoGoIosLocationMock = {
+      Accuracy: { Balanced: 3 },
+      requestForegroundPermissionsAsync: async () => ({ status: 'granted' }),
+      requestBackgroundPermissionsAsync: async () => {
+        throw new Error(
+          'One of the `NSLocation*UsageDescription` keys must be present in Info.plist to be able to use geolocation.'
+        );
+      },
+      watchPositionAsync: async (_opts, cb) => {
+        watchCallback = cb;
+        return { remove: () => {} };
+      },
+    };
+
+    const res = await syncGeofenceRegistration(
+      {
+        work_latitude: 12.9716,
+        work_longitude: 77.5946,
+        radius_meters: 150,
+      },
+      {
+        Location: expoGoIosLocationMock,
+        Notifications: mockNotificationsModule,
+        storage: mobileStorage,
+        fetchImpl: fetchBridge,
+      }
+    );
+
+    assert.equal(res.active, true);
+    assert.equal(res.mode, 'expo_go_live');
+    assert.equal(typeof watchCallback, 'function');
+  });
 });
