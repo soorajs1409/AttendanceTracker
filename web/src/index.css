@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Keep Leaflet controls neatly beneath sticky app headers/modals */
+.leaflet-container {
+  z-index: 10;
+  font-family: inherit;
+}
