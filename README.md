@@ -13,6 +13,21 @@
 
 ---
 
+## ⚡ Quick Navigation: Choose Your Plan
+
+Depending on your engineering goal, this repository provides two planning tracks:
+
+1. **[Recommended] The Lean Single-User Plan** 👉 [`docs/SIMPLE_PLAN.md`](docs/SIMPLE_PLAN.md)
+   - **No login/logout screens or auth flows**: Single pre-shared secret token (`X-API-KEY`).
+   - **Minimal SQLite database**: Just 2 tables (`settings` and `attendance_log`).
+   - **4 Core Endpoints**: `/api/status`, `/api/checkin`, `/api/history`, `/api/settings`.
+   - **Fast 4-Stage implementation**: Direct, uncluttered, and ready to build immediately.
+
+2. **The Comprehensive Enterprise-Grade Specification Suite** 👉 [`PROJECT.md`](PROJECT.md)
+   - Deep reference documentation covering 32 domain features, multi-profile Docker orchestration, advanced Litestream replication, OpenAPI 3.1 contracts, and forensic audit criteria.
+
+---
+
 ## 📌 Mission & Core Philosophy
 
 **Attendance Tracker** eliminates manual daily clock-ins for an individual professional. By coupling native OS background geofencing on mobile devices (iOS `CoreLocation` and Android `GeofenceManager`) with an embedded SQLite Write-Ahead Logging backend and a responsive Web Portal, the system automatically registers work arrivals when you physically enter your workplace boundary during your scheduled arrival window.
