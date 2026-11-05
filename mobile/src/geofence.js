@@ -40,11 +40,20 @@ function parseHhMmToMinutes(hhmm) {
  * Lazily resolves Expo native modules so unit tests in Node.js can run
  * with injected mocks without requiring the React Native bridge.
  */
-function getDefaultNativeModules() {
-  const Location = require('expo-location');
-  const TaskManager = require('expo-task-manager');
-  const Notifications = require('expo-notifications');
-  return { Location, TaskManager, Notifications };
+function getDefaultNativeModules(deps = {}) {
+  return {
+    Location: deps.Location || require('expo-location'),
+    TaskManager:
+      deps.TaskManager ||
+      (deps.Location && !deps.needTaskManager
+        ? null
+        : require('expo-task-manager')),
+    Notifications:
+      deps.Notifications ||
+      (deps.Location && !deps.needNotifications
+        ? null
+        : require('expo-notifications')),
+  };
 }
 
 async function sendLocalNotification(
@@ -168,7 +177,7 @@ async function processGeofenceEnterEvent(
  */
 function registerBackgroundGeofenceTask(deps = {}) {
   const { Location, TaskManager, Notifications } = {
-    ...getDefaultNativeModules(),
+    ...getDefaultNativeModules(deps),
     ...deps,
   };
 
@@ -203,7 +212,7 @@ function registerBackgroundGeofenceTask(deps = {}) {
  */
 async function syncGeofenceRegistration(settings, deps = {}) {
   const { Location, Notifications } = {
-    ...getDefaultNativeModules(),
+    ...getDefaultNativeModules(deps),
     ...deps,
   };
 
@@ -264,7 +273,7 @@ async function syncGeofenceRegistration(settings, deps = {}) {
 
 async function stopGeofenceRegistration(deps = {}) {
   const { Location } = {
-    ...getDefaultNativeModules(),
+    ...getDefaultNativeModules(deps),
     ...deps,
   };
   const started = await Location.hasStartedGeofencingAsync(GEOFENCE_TASK_NAME);
@@ -276,7 +285,7 @@ async function stopGeofenceRegistration(deps = {}) {
 
 async function getGeofenceStatus(deps = {}) {
   const { Location } = {
-    ...getDefaultNativeModules(),
+    ...getDefaultNativeModules(deps),
     ...deps,
   };
   try {

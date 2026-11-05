@@ -1,5 +1,26 @@
-const AsyncStorageModule = require('@react-native-async-storage/async-storage');
-const AsyncStorage = AsyncStorageModule.default || AsyncStorageModule;
+const memoryStore = new Map();
+const fallbackMemoryStorage = {
+  getItem: async (k) => (memoryStore.has(k) ? memoryStore.get(k) : null),
+  setItem: async (k, v) => {
+    memoryStore.set(k, String(v));
+  },
+  removeItem: async (k) => {
+    memoryStore.delete(k);
+  },
+};
+
+function getDefaultStorage() {
+  try {
+    const mod = require('@react-native-async-storage/async-storage');
+    const resolved = mod?.default || mod;
+    if (resolved && typeof resolved.getItem === 'function') {
+      return resolved;
+    }
+  } catch {
+    // Fallback to in-memory storage in Node test environments
+  }
+  return fallbackMemoryStorage;
+}
 
 const STORAGE_URL_KEY = 'attendance_mobile_server_url';
 const STORAGE_API_KEY = 'attendance_mobile_api_key';
@@ -9,7 +30,7 @@ const STORAGE_LAST_SETTINGS_KEY = 'attendance_mobile_cached_settings';
 const DEFAULT_SERVER_URL = 'http://localhost:3000';
 const DEFAULT_API_KEY = 'my_super_secret_key_123';
 
-async function getConnectionConfig(storage = AsyncStorage) {
+async function getConnectionConfig(storage = getDefaultStorage()) {
   const [savedUrl, savedKey] = await Promise.all([
     storage.getItem(STORAGE_URL_KEY),
     storage.getItem(STORAGE_API_KEY),
@@ -26,7 +47,7 @@ async function getConnectionConfig(storage = AsyncStorage) {
 
 async function saveConnectionConfig(
   { serverUrl, apiKey },
-  storage = AsyncStorage
+  storage = getDefaultStorage()
 ) {
   const normalizedUrl = String(serverUrl || '')
     .trim()
@@ -39,12 +60,12 @@ async function saveConnectionConfig(
   return { serverUrl: normalizedUrl, apiKey: normalizedKey };
 }
 
-async function cacheWorkplaceSettings(settings, storage = AsyncStorage) {
+async function cacheWorkplaceSettings(settings, storage = getDefaultStorage()) {
   if (!settings) return;
   await storage.setItem(STORAGE_LAST_SETTINGS_KEY, JSON.stringify(settings));
 }
 
-async function getCachedWorkplaceSettings(storage = AsyncStorage) {
+async function getCachedWorkplaceSettings(storage = getDefaultStorage()) {
   const raw = await storage.getItem(STORAGE_LAST_SETTINGS_KEY);
   if (!raw) return null;
   try {
@@ -55,7 +76,7 @@ async function getCachedWorkplaceSettings(storage = AsyncStorage) {
 }
 
 async function apiRequest(path, options = {}, deps = {}) {
-  const storage = deps.storage || AsyncStorage;
+  const storage = deps.storage || getDefaultStorage();
   const fetchImpl = deps.fetchImpl || fetch;
 
   const conn = await getConnectionConfig(storage);
@@ -144,7 +165,7 @@ async function saveSettings(settings, deps = {}) {
  * Stores check-in payloads locally if network is unreachable when entering geofence,
  * preserving the exact arrival date & time for idempotent replay.
  */
-async function getPendingCheckIns(storage = AsyncStorage) {
+async function getPendingCheckIns(storage = getDefaultStorage()) {
   const raw = await storage.getItem(STORAGE_PENDING_QUEUE_KEY);
   if (!raw) return [];
   try {
@@ -155,7 +176,7 @@ async function getPendingCheckIns(storage = AsyncStorage) {
   }
 }
 
-async function enqueuePendingCheckIn(item, storage = AsyncStorage) {
+async function enqueuePendingCheckIn(item, storage = getDefaultStorage()) {
   const list = await getPendingCheckIns(storage);
   // Deduplicate by calendar date so only the earliest arrival for a day is queued
   if (!list.some((existing) => existing.date === item.date)) {
@@ -169,7 +190,7 @@ async function enqueuePendingCheckIn(item, storage = AsyncStorage) {
 }
 
 async function flushPendingCheckIns(deps = {}) {
-  const storage = deps.storage || AsyncStorage;
+  const storage = deps.storage || getDefaultStorage();
   const list = await getPendingCheckIns(storage);
   if (list.length === 0) {
     return { flushed: 0, remaining: 0 };
