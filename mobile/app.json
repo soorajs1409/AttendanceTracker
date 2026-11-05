@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Attendance Tracker",
+    "slug": "attendance-tracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.attendancetracker.singleuser",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Attendance Tracker uses your location to verify when you arrive at your configured workplace.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Attendance Tracker monitors your workplace geofence in the background so you are automatically marked present without opening the app.",
+        "UIBackgroundModes": [
+          "location"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.attendancetracker.singleuser",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Attendance Tracker to monitor your workplace boundary in the background for automatic daily check-ins.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#4f46e5"
+        }
+      ]
+    ]
+  }
+}
