@@ -1,0 +1,15 @@
+{
+  "name": "attendance-tracker-server",
+  "version": "1.0.0",
+  "description": "Lean single-user Attendance Tracker backend with native SQLite",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test test/server.test.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
