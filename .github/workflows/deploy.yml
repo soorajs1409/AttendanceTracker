@@ -21,14 +21,13 @@ jobs:
           mkdir -p /opt/attendance-tracker/web
           npm --prefix web ci || npm --prefix web install
           npm --prefix web run build
-          # Sync dist contents to /opt/attendance-tracker/web
           rsync -av --delete web/dist/ /opt/attendance-tracker/web/
 
       - name: Deploy Server
         run: |
           mkdir -p /opt/attendance-tracker/server/data
-          # Sync server code while preserving production data/ and node_modules
-          rsync -av --exclude 'data/' --exclude 'node_modules/' server/ /opt/attendance-tracker/server/
+          # Sync server code while protecting production DB, .env, and node_modules
+          rsync -av --delete --exclude 'data/' --exclude 'node_modules/' --exclude '.env' server/ /opt/attendance-tracker/server/
           cd /opt/attendance-tracker/server
           npm install --omit=dev
 
