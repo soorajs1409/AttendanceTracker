@@ -52,7 +52,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight text-slate-900 leading-tight">
-                Attendance Tracker (DEV)
+                Attendance Tracker (DEV, testing build)
               </h1>
               <p className="text-[11px] font-medium text-slate-500">
                 Automated Geofence Portal
