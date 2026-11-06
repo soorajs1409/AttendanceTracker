@@ -8,6 +8,9 @@ const {
   getPendingCheckIns,
   flushPendingCheckIns,
   setDayAttendance,
+  isOnboardingCompleted,
+  setOnboardingCompleted,
+  resetOnboarding,
 } = require('../src/api');
 const {
   GEOFENCE_TASK_NAME,
@@ -264,6 +267,22 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     assert.equal(resClear.record, null);
     rec = dbStore.getAttendanceByDate('2026-11-10');
     assert.equal(rec, null);
+  });
+
+  it('manages first-time onboarding state cleanly via storage helpers', async () => {
+    // Fresh storage initially returns false
+    const initiallyDone = await isOnboardingCompleted(mobileStorage);
+    assert.equal(initiallyDone, false);
+
+    // After completing setup
+    await setOnboardingCompleted(true, mobileStorage);
+    const completed = await isOnboardingCompleted(mobileStorage);
+    assert.equal(completed, true);
+
+    // Resetting onboarding returns it to false
+    await resetOnboarding(mobileStorage);
+    const afterReset = await isOnboardingCompleted(mobileStorage);
+    assert.equal(afterReset, false);
   });
 
   it('gracefully catches iOS Expo Go NSLocation*UsageDescription Info.plist error and falls back to live GPS geofencing', async () => {

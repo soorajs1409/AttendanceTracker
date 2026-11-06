@@ -26,9 +26,26 @@ const STORAGE_URL_KEY = 'attendance_mobile_server_url';
 const STORAGE_API_KEY = 'attendance_mobile_api_key';
 const STORAGE_PENDING_QUEUE_KEY = 'attendance_mobile_pending_checkins';
 const STORAGE_LAST_SETTINGS_KEY = 'attendance_mobile_cached_settings';
+const STORAGE_ONBOARDING_KEY = 'attendance_mobile_onboarding_completed';
 
 const DEFAULT_SERVER_URL = 'http://localhost:3000';
 const DEFAULT_API_KEY = 'my_super_secret_key_123';
+
+async function isOnboardingCompleted(storage = getDefaultStorage()) {
+  const val = await storage.getItem(STORAGE_ONBOARDING_KEY);
+  return val === 'true';
+}
+
+async function setOnboardingCompleted(
+  completed = true,
+  storage = getDefaultStorage()
+) {
+  await storage.setItem(STORAGE_ONBOARDING_KEY, completed ? 'true' : 'false');
+}
+
+async function resetOnboarding(storage = getDefaultStorage()) {
+  await storage.removeItem(STORAGE_ONBOARDING_KEY);
+}
 
 async function getConnectionConfig(storage = getDefaultStorage()) {
   const [savedUrl, savedKey] = await Promise.all([
@@ -270,6 +287,9 @@ module.exports = {
   fetchHistory,
   saveSettings,
   setDayAttendance,
+  isOnboardingCompleted,
+  setOnboardingCompleted,
+  resetOnboarding,
   getPendingCheckIns,
   enqueuePendingCheckIn,
   flushPendingCheckIns,

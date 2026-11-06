@@ -6,6 +6,7 @@ const {
   TouchableOpacity,
   StyleSheet,
   AppState,
+  ActivityIndicator,
 } = require('react-native');
 const { StatusBar } = require('expo-status-bar');
 const {
@@ -13,6 +14,7 @@ const {
   SafeAreaView,
 } = require('react-native-safe-area-context');
 
+const OnboardingScreen = require('./src/screens/OnboardingScreen');
 const DashboardScreen = require('./src/screens/DashboardScreen');
 const HistoryScreen = require('./src/screens/HistoryScreen');
 const SettingsScreen = require('./src/screens/SettingsScreen');
@@ -20,6 +22,8 @@ const {
   fetchStatus,
   getPendingCheckIns,
   flushPendingCheckIns,
+  isOnboardingCompleted,
+  resetOnboarding,
 } = require('./src/api');
 const { getGeofenceStatus } = require('./src/geofence');
 
@@ -30,6 +34,7 @@ const TABS = [
 ];
 
 function MainShell() {
+  const [isOnboarded, setIsOnboarded] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [statusData, setStatusData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -64,14 +69,57 @@ function MainShell() {
   }, [refreshGeofenceState]);
 
   useEffect(() => {
-    loadAll();
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
+    let mounted = true;
+    isOnboardingCompleted().then((completed) => {
+      if (!mounted) return;
+      setIsOnboarded(completed);
+      if (completed) {
         loadAll();
+      } else {
+        setLoading(false);
       }
     });
-    return () => sub.remove();
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        isOnboardingCompleted().then((completed) => {
+          if (!mounted) return;
+          if (completed) {
+            loadAll();
+          }
+        });
+      }
+    });
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
   }, [loadAll]);
+
+  // While checking first-time onboarding state
+  if (isOnboarded === null) {
+    return (
+      <SafeAreaView style={[styles.safeArea, styles.loadingCenter]}>
+        <StatusBar style="dark" />
+        <ActivityIndicator size="large" color="#4f46e5" />
+      </SafeAreaView>
+    );
+  }
+
+  // First-time launch: display setup of map coordinates & server URL
+  if (!isOnboarded) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <StatusBar style="dark" />
+        <OnboardingScreen
+          onComplete={async () => {
+            setIsOnboarded(true);
+            await loadAll();
+          }}
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -162,6 +210,10 @@ function MainShell() {
             geofenceState={geofenceState}
             onRefreshStatus={loadAll}
             onRefreshGeofence={refreshGeofenceState}
+            onResetOnboarding={async () => {
+              await resetOnboarding();
+              setIsOnboarded(false);
+            }}
           />
         )}
       </View>
@@ -207,6 +259,10 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#ffffff',
+  },
+  loadingCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   header: {
     paddingHorizontal: 16,

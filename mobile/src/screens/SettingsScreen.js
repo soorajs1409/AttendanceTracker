@@ -39,6 +39,7 @@ function SettingsScreen({
   geofenceState,
   onRefreshStatus,
   onRefreshGeofence,
+  onResetOnboarding,
 }) {
   const s = statusData?.settings || {};
 
@@ -603,6 +604,24 @@ function SettingsScreen({
           </Text>
         )}
       </View>
+
+      {/* Re-run Setup Wizard */}
+      {onResetOnboarding && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🔄 First-Time Setup Wizard</Text>
+          <Text style={styles.cardSub}>
+            Re-open the initial setup page with map coordinates and server configuration.
+          </Text>
+          <TouchableOpacity
+            style={[styles.outlineBtn, { borderColor: '#94a3b8' }]}
+            onPress={onResetOnboarding}
+          >
+            <Text style={[styles.outlineBtnText, { color: '#334155' }]}>
+              Re-run Initial Setup
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </ScrollView>
   );
 }
