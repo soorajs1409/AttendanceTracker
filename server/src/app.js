@@ -170,6 +170,34 @@ function createApp({
         return;
       }
 
+      // Login route (accessible before or with API key so user can sign in and then configure initial setup)
+      if (req.method === 'POST' && pathname === '/api/login') {
+        let body;
+        try {
+          body = await parseJsonBody(req);
+        } catch (err) {
+          sendJson(res, 400, { error: err.message });
+          return;
+        }
+
+        const username = String(body.username || '').trim();
+        const password = String(body.password ?? '');
+
+        if (!store.verifyCredentials(username, password)) {
+          sendJson(res, 401, {
+            error: 'Invalid username or password',
+          });
+          return;
+        }
+
+        sendJson(res, 200, {
+          success: true,
+          user: store.getUser(),
+          settings: store.getSettings(),
+        });
+        return;
+      }
+
       // API Key Verification (if configured)
       if (apiKey) {
         const headerKey =
@@ -208,7 +236,54 @@ function createApp({
             notes: todayRecord ? todayRecord.notes : null,
           },
           settings,
+          user: store.getUser(),
           recent,
+        });
+        return;
+      }
+
+      // 1b. GET /api/profile & PUT/POST /api/profile
+      if (req.method === 'GET' && pathname === '/api/profile') {
+        sendJson(res, 200, {
+          user: store.getUser(),
+        });
+        return;
+      }
+
+      if (
+        (req.method === 'PUT' || req.method === 'POST') &&
+        pathname === '/api/profile'
+      ) {
+        let body;
+        try {
+          body = await parseJsonBody(req);
+        } catch (err) {
+          sendJson(res, 400, { error: err.message });
+          return;
+        }
+
+        if (body.username !== undefined && !String(body.username).trim()) {
+          sendJson(res, 400, {
+            error: 'username cannot be empty',
+          });
+          return;
+        }
+
+        if (body.password !== undefined && !String(body.password)) {
+          sendJson(res, 400, {
+            error: 'password cannot be empty',
+          });
+          return;
+        }
+
+        const updatedUser = store.updateUser({
+          username: body.username,
+          password: body.password,
+        });
+
+        sendJson(res, 200, {
+          success: true,
+          user: updatedUser,
         });
         return;
       }

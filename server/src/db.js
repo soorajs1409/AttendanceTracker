@@ -108,10 +108,23 @@ function createDatabase(dbPath) {
       notes TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS user_account (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      username TEXT NOT NULL DEFAULT 'sunil',
+      password TEXT NOT NULL DEFAULT 'test',
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     INSERT OR IGNORE INTO settings (
       id, work_name, work_latitude, work_longitude, radius_meters, window_start, window_end, work_days
     ) VALUES (
       1, 'Office', 0.0, 0.0, 100, '09:00', '10:00', '1,2,3,4,5'
+    );
+
+    INSERT OR IGNORE INTO user_account (
+      id, username, password
+    ) VALUES (
+      1, 'sunil', 'test'
     );
   `);
 
@@ -121,6 +134,20 @@ function createDatabase(dbPath) {
     SELECT id, work_name, work_latitude, work_longitude, radius_meters,
            window_start, window_end, work_days, updated_at
     FROM settings
+    WHERE id = 1
+  `);
+
+  const getUserStmt = db.prepare(`
+    SELECT id, username, password, updated_at
+    FROM user_account
+    WHERE id = 1
+  `);
+
+  const updateUserStmt = db.prepare(`
+    UPDATE user_account
+    SET username = ?,
+        password = ?,
+        updated_at = ?
     WHERE id = 1
   `);
 
@@ -204,6 +231,40 @@ function createDatabase(dbPath) {
   function getSettings() {
     const row = getSettingsStmt.get();
     return formatSettings(row);
+  }
+
+  function getUser() {
+    const row = getUserStmt.get();
+    if (!row) return { username: 'sunil', updated_at: null };
+    return {
+      username: row.username,
+      updated_at: row.updated_at,
+    };
+  }
+
+  function verifyCredentials(username, password) {
+    const row = getUserStmt.get();
+    if (!row) return false;
+    return (
+      String(username || '').trim() === row.username &&
+      String(password ?? '') === row.password
+    );
+  }
+
+  function updateUser(updates = {}) {
+    const row = getUserStmt.get();
+    const nextUsername =
+      updates.username !== undefined && String(updates.username).trim()
+        ? String(updates.username).trim()
+        : row.username;
+    const nextPassword =
+      updates.password !== undefined && String(updates.password) !== ''
+        ? String(updates.password)
+        : row.password;
+    const updated_at = new Date().toISOString();
+
+    updateUserStmt.run(nextUsername, nextPassword, updated_at);
+    return getUser();
   }
 
   function updateSettings(updates = {}) {
@@ -369,6 +430,9 @@ function createDatabase(dbPath) {
     db,
     getSettings,
     updateSettings,
+    getUser,
+    verifyCredentials,
+    updateUser,
     getAttendanceByDate,
     getRecentAttendance,
     getMonthlyAttendance,

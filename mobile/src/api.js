@@ -27,9 +27,60 @@ const STORAGE_API_KEY = 'attendance_mobile_api_key';
 const STORAGE_PENDING_QUEUE_KEY = 'attendance_mobile_pending_checkins';
 const STORAGE_LAST_SETTINGS_KEY = 'attendance_mobile_cached_settings';
 const STORAGE_ONBOARDING_KEY = 'attendance_mobile_onboarding_completed';
+const STORAGE_AUTH_USER_KEY = 'attendance_mobile_auth_user';
+const STORAGE_LOCAL_CRED_KEY = 'attendance_mobile_local_creds';
 
 const DEFAULT_SERVER_URL = 'http://localhost:3000';
 const DEFAULT_API_KEY = 'my_super_secret_key_123';
+
+async function getAuthUser(storage = getDefaultStorage()) {
+  const raw = await storage.getItem(STORAGE_AUTH_USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function setAuthUser(user, storage = getDefaultStorage()) {
+  if (!user) {
+    await storage.removeItem(STORAGE_AUTH_USER_KEY);
+    return;
+  }
+  await storage.setItem(STORAGE_AUTH_USER_KEY, JSON.stringify(user));
+}
+
+async function logoutUser(storage = getDefaultStorage()) {
+  await storage.removeItem(STORAGE_AUTH_USER_KEY);
+}
+
+async function getLocalFallbackCreds(storage = getDefaultStorage()) {
+  const raw = await storage.getItem(STORAGE_LOCAL_CRED_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.username && parsed?.password) return parsed;
+    } catch {
+      // fall through
+    }
+  }
+  return { username: 'sunil', password: 'test' };
+}
+
+async function saveLocalFallbackCreds(
+  { username, password },
+  storage = getDefaultStorage()
+) {
+  const current = await getLocalFallbackCreds(storage);
+  await storage.setItem(
+    STORAGE_LOCAL_CRED_KEY,
+    JSON.stringify({
+      username: username ? String(username).trim() : current.username,
+      password: password ? String(password) : current.password,
+    })
+  );
+}
 
 async function isOnboardingCompleted(storage = getDefaultStorage()) {
   const val = await storage.getItem(STORAGE_ONBOARDING_KEY);
@@ -144,6 +195,75 @@ async function fetchStatus(overrides = {}, deps = {}) {
     await cacheWorkplaceSettings(data.settings, deps.storage);
   }
   return data;
+}
+
+async function loginUser({ username, password }, deps = {}) {
+  const storage = deps.storage || getDefaultStorage();
+  const cleanUser = String(username || '').trim();
+  const cleanPass = String(password ?? '');
+
+  try {
+    const res = await apiRequest(
+      '/api/login',
+      {
+        method: 'POST',
+        body: { username: cleanUser, password: cleanPass },
+      },
+      deps
+    );
+    const userObj = res?.user || { username: cleanUser };
+    await saveLocalFallbackCreds(
+      { username: userObj.username, password: cleanPass },
+      storage
+    );
+    await setAuthUser(userObj, storage);
+    if (res?.settings) {
+      await cacheWorkplaceSettings(res.settings, storage);
+    }
+    return { user: userObj, settings: res?.settings || null };
+  } catch (err) {
+    if (err.status === 401) {
+      throw new Error('Invalid username or password');
+    }
+    // Before initial setup, if server URL is not yet reachable, verify against local/default credentials (sunil / test)
+    const fallback = await getLocalFallbackCreds(storage);
+    if (cleanUser === fallback.username && cleanPass === fallback.password) {
+      const userObj = { username: cleanUser };
+      await setAuthUser(userObj, storage);
+      return { user: userObj, settings: null, offlineFallback: true };
+    }
+    throw new Error('Invalid username or password');
+  }
+}
+
+async function fetchProfile(deps = {}) {
+  return apiRequest('/api/profile', {}, deps);
+}
+
+async function updateProfile({ username, password }, deps = {}) {
+  const storage = deps.storage || getDefaultStorage();
+  const res = await apiRequest(
+    '/api/profile',
+    {
+      method: 'PUT',
+      body: {
+        ...(username !== undefined ? { username } : {}),
+        ...(password ? { password } : {}),
+      },
+    },
+    deps
+  );
+  if (res?.user) {
+    await setAuthUser(res.user, storage);
+    await saveLocalFallbackCreds(
+      {
+        username: res.user.username,
+        ...(password ? { password } : {}),
+      },
+      storage
+    );
+  }
+  return res;
 }
 
 async function submitCheckIn(payload, deps = {}) {
@@ -283,6 +403,12 @@ module.exports = {
   cacheWorkplaceSettings,
   getCachedWorkplaceSettings,
   fetchStatus,
+  loginUser,
+  fetchProfile,
+  updateProfile,
+  getAuthUser,
+  setAuthUser,
+  logoutUser,
   submitCheckIn,
   fetchHistory,
   saveSettings,

@@ -3,25 +3,38 @@ import {
   LayoutDashboard,
   CalendarDays,
   Settings as SettingsIcon,
+  User,
   MapPinCheck,
   Wifi,
   WifiOff,
 } from 'lucide-react';
+import LoginView from './components/LoginView';
+import SetupView from './components/SetupView';
 import DashboardView from './components/DashboardView';
 import HistoryView from './components/HistoryView';
 import SettingsView from './components/SettingsView';
-import { fetchStatus } from './api';
+import ProfileView from './components/ProfileView';
+import {
+  fetchStatus,
+  getAuthUser,
+  logoutUser,
+  isSetupCompleted,
+  setSetupCompleted,
+} from './api';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
   { id: 'history', label: 'Calendar', Icon: CalendarDays },
   { id: 'settings', label: 'Settings', Icon: SettingsIcon },
+  { id: 'profile', label: 'Profile', Icon: User },
 ];
 
 export default function App() {
+  const [authUser, setAuthUserState] = useState(() => getAuthUser());
+  const [setupDone, setSetupDone] = useState(() => isSetupCompleted());
   const [activeTab, setActiveTab] = useState('dashboard');
   const [statusData, setStatusData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [connError, setConnError] = useState(null);
 
   const loadStatus = useCallback(async () => {
@@ -38,9 +51,39 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    loadStatus();
-  }, [loadStatus]);
+    if (authUser && setupDone) {
+      loadStatus();
+    }
+  }, [authUser, setupDone, loadStatus]);
 
+  // 1. Login Screen
+  if (!authUser) {
+    return (
+      <LoginView
+        onLoginSuccess={({ user, settings }) => {
+          setAuthUserState(user);
+          if (settings) {
+            setStatusData((prev) => ({ ...(prev || {}), settings, user }));
+          }
+        }}
+      />
+    );
+  }
+
+  // 2. Post-Login Initial Setup Prompt (Server URL, API Key, Lat & Long)
+  if (!setupDone) {
+    return (
+      <SetupView
+        initialSettings={statusData?.settings}
+        onComplete={async () => {
+          setSetupDone(true);
+          await loadStatus();
+        }}
+      />
+    );
+  }
+
+  // 3. Main Synced 4-Tab Application
   return (
     <div className="min-h-screen flex flex-col pb-20 sm:pb-10">
       {/* Sticky Top Header */}
@@ -55,7 +98,7 @@ export default function App() {
                 Attendance Tracker
               </h1>
               <p className="text-[11px] font-medium text-slate-500">
-                Automated Geofence Portal
+                {statusData?.user?.username || authUser.username}
               </p>
             </div>
           </div>
@@ -155,11 +198,27 @@ export default function App() {
             onRefreshStatus={loadStatus}
           />
         )}
+
+        {activeTab === 'profile' && (
+          <ProfileView
+            statusData={statusData}
+            onRefreshStatus={loadStatus}
+            onReopenSetup={() => {
+              setSetupCompleted(false);
+              setSetupDone(false);
+            }}
+            onLogout={() => {
+              logoutUser();
+              setAuthUserState(null);
+              setActiveTab('dashboard');
+            }}
+          />
+        )}
       </main>
 
       {/* Mobile Bottom Navigation Bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md sm:hidden">
-        <div className="grid grid-cols-3">
+        <div className="grid grid-cols-4">
           {TABS.map(({ id, label, Icon }) => {
             const isActive = activeTab === id;
             return (

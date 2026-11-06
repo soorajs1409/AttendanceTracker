@@ -347,3 +347,59 @@ describe('Attendance Tracker — legacy database migration', () => {
     }
   });
 });
+
+describe('Attendance Tracker — User Authentication & Profile', () => {
+  it('authenticates default user (sunil / test) and allows profile update', async () => {
+    const store = createDatabase(':memory:');
+    const app = createApp({ store, apiKey: 'secret_key_123' });
+
+    try {
+      // 1. Default login succeeds even before X-API-Key is configured
+      const loginOk = await app.inject({
+        method: 'POST',
+        url: '/api/login',
+        body: { username: 'sunil', password: 'test' },
+      });
+      assert.equal(loginOk.status, 200);
+      const loginBody = await loginOk.json();
+      assert.equal(loginBody.success, true);
+      assert.equal(loginBody.user.username, 'sunil');
+
+      // 2. Wrong password fails with 401
+      const loginBad = await app.inject({
+        method: 'POST',
+        url: '/api/login',
+        body: { username: 'sunil', password: 'wrong' },
+      });
+      assert.equal(loginBad.status, 401);
+
+      // 3. Update profile username & password via PUT /api/profile
+      const updateRes = await app.inject({
+        method: 'PUT',
+        url: '/api/profile',
+        headers: { 'X-API-Key': 'secret_key_123' },
+        body: { username: 'sunil_admin', password: 'newpassword' },
+      });
+      assert.equal(updateRes.status, 200);
+      const updateData = await updateRes.json();
+      assert.equal(updateData.user.username, 'sunil_admin');
+
+      // 4. Old credentials fail, new credentials succeed
+      const oldLogin = await app.inject({
+        method: 'POST',
+        url: '/api/login',
+        body: { username: 'sunil', password: 'test' },
+      });
+      assert.equal(oldLogin.status, 401);
+
+      const newLogin = await app.inject({
+        method: 'POST',
+        url: '/api/login',
+        body: { username: 'sunil_admin', password: 'newpassword' },
+      });
+      assert.equal(newLogin.status, 200);
+    } finally {
+      store.close();
+    }
+  });
+});

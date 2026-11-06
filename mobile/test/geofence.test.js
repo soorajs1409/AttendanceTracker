@@ -11,6 +11,10 @@ const {
   isOnboardingCompleted,
   setOnboardingCompleted,
   resetOnboarding,
+  loginUser,
+  updateProfile,
+  getAuthUser,
+  logoutUser,
 } = require('../src/api');
 const {
   GEOFENCE_TASK_NAME,
@@ -318,5 +322,26 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     assert.equal(res.active, true);
     assert.equal(res.mode, 'expo_go_live');
     assert.equal(typeof watchCallback, 'function');
+  });
+
+  it('supports mobile login (sunil / test), profile update, and logout', async () => {
+    const loginRes = await loginUser(
+      { username: 'sunil', password: 'test' },
+      { storage: mobileStorage, fetchImpl: fetchBridge }
+    );
+    assert.equal(loginRes.user.username, 'sunil');
+
+    const storedUser = await getAuthUser(mobileStorage);
+    assert.equal(storedUser.username, 'sunil');
+
+    const updated = await updateProfile(
+      { username: 'sunil', password: 'test' },
+      { storage: mobileStorage, fetchImpl: fetchBridge }
+    );
+    assert.equal(updated.success, true);
+
+    await logoutUser(mobileStorage);
+    const afterLogout = await getAuthUser(mobileStorage);
+    assert.equal(afterLogout, null);
   });
 });

@@ -14,16 +14,20 @@ const {
   SafeAreaView,
 } = require('react-native-safe-area-context');
 
+const LoginScreen = require('./src/screens/LoginScreen');
 const OnboardingScreen = require('./src/screens/OnboardingScreen');
 const DashboardScreen = require('./src/screens/DashboardScreen');
 const HistoryScreen = require('./src/screens/HistoryScreen');
 const SettingsScreen = require('./src/screens/SettingsScreen');
+const ProfileScreen = require('./src/screens/ProfileScreen');
 const {
   fetchStatus,
   getPendingCheckIns,
   flushPendingCheckIns,
   isOnboardingCompleted,
   resetOnboarding,
+  getAuthUser,
+  logoutUser,
 } = require('./src/api');
 const { getGeofenceStatus } = require('./src/geofence');
 
@@ -31,9 +35,11 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
   { id: 'history', label: 'Calendar', icon: '📅' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
+  { id: 'profile', label: 'Profile', icon: '👤' },
 ];
 
 function MainShell() {
+  const [authUser, setAuthUserState] = useState(undefined);
   const [isOnboarded, setIsOnboarded] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [statusData, setStatusData] = useState(null);
@@ -70,24 +76,29 @@ function MainShell() {
 
   useEffect(() => {
     let mounted = true;
-    isOnboardingCompleted().then((completed) => {
-      if (!mounted) return;
-      setIsOnboarded(completed);
-      if (completed) {
-        loadAll();
-      } else {
-        setLoading(false);
+    Promise.all([getAuthUser(), isOnboardingCompleted()]).then(
+      ([user, completed]) => {
+        if (!mounted) return;
+        setAuthUserState(user);
+        setIsOnboarded(completed);
+        if (user && completed) {
+          loadAll();
+        } else {
+          setLoading(false);
+        }
       }
-    });
+    );
 
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        isOnboardingCompleted().then((completed) => {
-          if (!mounted) return;
-          if (completed) {
-            loadAll();
+        Promise.all([getAuthUser(), isOnboardingCompleted()]).then(
+          ([user, completed]) => {
+            if (!mounted) return;
+            if (user && completed) {
+              loadAll();
+            }
           }
-        });
+        );
       }
     });
     return () => {
@@ -96,8 +107,8 @@ function MainShell() {
     };
   }, [loadAll]);
 
-  // While checking first-time onboarding state
-  if (isOnboarded === null) {
+  // While checking initial auth & onboarding state
+  if (authUser === undefined || isOnboarded === null) {
     return (
       <SafeAreaView style={[styles.safeArea, styles.loadingCenter]}>
         <StatusBar style="dark" />
@@ -106,7 +117,29 @@ function MainShell() {
     );
   }
 
-  // First-time launch: display setup of map coordinates & server URL
+  // 1. Not Logged In -> Display Minimal Login Screen
+  if (!authUser) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <StatusBar style="dark" />
+        <LoginScreen
+          onLoginSuccess={async ({ user, settings }) => {
+            setAuthUserState(user);
+            if (settings) {
+              setStatusData((prev) => ({ ...(prev || {}), settings, user }));
+            }
+            const completed = await isOnboardingCompleted();
+            setIsOnboarded(completed);
+            if (completed) {
+              await loadAll();
+            }
+          }}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  // 2. Post-Login Initial Setup Prompt (Server URL, API Key, Lat & Long)
   if (!isOnboarded) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -121,6 +154,7 @@ function MainShell() {
     );
   }
 
+  // 3. Main Synced 4-Tab Application
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <StatusBar style="dark" />
@@ -133,7 +167,9 @@ function MainShell() {
           </View>
           <View>
             <Text style={styles.headerTitle}>Attendance Tracker</Text>
-            <Text style={styles.headerSub}>Mobile Geofence Client</Text>
+            <Text style={styles.headerSub}>
+              {statusData?.user?.username || authUser.username}
+            </Text>
           </View>
         </View>
 
@@ -213,6 +249,22 @@ function MainShell() {
             onResetOnboarding={async () => {
               await resetOnboarding();
               setIsOnboarded(false);
+            }}
+          />
+        )}
+
+        {activeTab === 'profile' && (
+          <ProfileScreen
+            statusData={statusData}
+            onRefreshStatus={loadAll}
+            onReopenSetup={async () => {
+              await resetOnboarding();
+              setIsOnboarded(false);
+            }}
+            onLogout={async () => {
+              await logoutUser();
+              setAuthUserState(null);
+              setActiveTab('dashboard');
             }}
           />
         )}
