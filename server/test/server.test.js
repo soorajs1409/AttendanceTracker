@@ -7,7 +7,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { createDatabase } = require('../src/db');
 const { createApp } = require('../src/app');
 
-describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
+describe('Attendance Tracker — Server (WFO / WFH / LEAVE model)', () => {
   let store;
   let server;
   const TEST_API_KEY = 'test_secret_key_999';
@@ -64,7 +64,7 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     assert.deepEqual(data.settings.work_days, [1, 2, 3, 4, 5]);
   });
 
-  it('does not auto-mark ABSENT while the work location is not configured', () => {
+  it('does not auto-mark WFH while the work location is not configured', () => {
     currentClock = new Date('2026-11-05T06:00:00.000Z'); // 11:30 IST, after window
     const result = server.runAbsenceCheck();
     assert.equal(result.marked, false);
@@ -114,7 +114,7 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     assert.equal(badTimeRes.status, 400);
   });
 
-  it('arrival within the window marks PRESENT and repeat arrivals are idempotent', async () => {
+  it('arrival within the window marks WFO and repeat arrivals are idempotent', async () => {
     const res1 = await server.inject({
       method: 'POST',
       url: '/api/checkin',
@@ -126,7 +126,7 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     const data1 = await res1.json();
     assert.equal(data1.date, '2026-11-05');
     assert.equal(data1.time, '09:15:30');
-    assert.equal(data1.status, 'PRESENT');
+    assert.equal(data1.status, 'WFO');
     assert.equal(data1.within_geofence, true);
 
     // Re-entering after lunch must not change anything
@@ -141,14 +141,14 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     assert.equal(res2.status, 200);
     assert.equal(data2.already_existed, true);
     assert.equal(data2.time, '09:15:30');
-    assert.equal(data2.status, 'PRESENT');
+    assert.equal(data2.status, 'WFO');
 
-    // Absence check must leave a PRESENT day untouched
+    // Absence check must leave a WFO day untouched
     assert.equal(server.runAbsenceCheck().marked, false);
-    assert.equal(store.getAttendanceByDate('2026-11-05').status, 'PRESENT');
+    assert.equal(store.getAttendanceByDate('2026-11-05').status, 'WFO');
   });
 
-  it('arrival after window end marks ABSENT but still logs the arrival time', async () => {
+  it('arrival after window end marks WFH but still logs the arrival time', async () => {
     // Friday, 2026-11-06 at 10:42:10 IST
     currentClock = new Date('2026-11-06T05:12:10.000Z');
 
@@ -163,10 +163,10 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     const data = await res.json();
     assert.equal(data.date, '2026-11-06');
     assert.equal(data.time, '10:42:10');
-    assert.equal(data.status, 'ABSENT');
+    assert.equal(data.status, 'WFH');
   });
 
-  it('auto-marks a workday ABSENT only after the window closes with no arrival', () => {
+  it('auto-marks a workday WFH only after the window closes with no arrival', () => {
     // Sunday 2026-11-08 11:00 IST — non-working day, never auto-marked
     currentClock = new Date('2026-11-08T05:30:00.000Z');
     assert.equal(server.runAbsenceCheck().reason, 'non_work_day');
@@ -177,12 +177,12 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     assert.equal(server.runAbsenceCheck().reason, 'window_open');
     assert.equal(store.getAttendanceByDate('2026-11-09'), null);
 
-    // Monday 10:01 IST — window closed, nothing recorded -> ABSENT
+    // Monday 10:01 IST — window closed, nothing recorded -> WFH
     currentClock = new Date('2026-11-09T04:31:00.000Z');
     const result = server.runAbsenceCheck();
     assert.equal(result.marked, true);
     const rec = store.getAttendanceByDate('2026-11-09');
-    assert.equal(rec.status, 'ABSENT');
+    assert.equal(rec.status, 'WFH');
     assert.equal(rec.trigger_type, 'AUTO');
     assert.equal(rec.check_in_time, null);
 
@@ -190,7 +190,7 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     assert.equal(server.runAbsenceCheck().marked, false);
   });
 
-  it('an offline-queued arrival from inside the window upgrades an auto-ABSENT day to PRESENT', async () => {
+  it('an offline-queued arrival from inside the window upgrades an auto-WFH day to WFO', async () => {
     // Phone reached work at 09:40 but was offline; replays at 11:15
     currentClock = new Date('2026-11-09T05:45:00.000Z');
     const res = await server.inject({
@@ -202,25 +202,25 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
 
     assert.equal(res.status, 201);
     const data = await res.json();
-    assert.equal(data.status, 'PRESENT');
+    assert.equal(data.status, 'WFO');
     assert.equal(data.time, '09:40:00');
     assert.equal(data.trigger, 'GEOFENCE');
   });
 
-  it('PUT /api/attendance/:date manually marks ABSENT, then PRESENT, then clears the day', async () => {
-    const absentRes = await server.inject({
+  it('PUT /api/attendance/:date manually marks LEAVE, then WFO, then clears the day', async () => {
+    const leaveRes = await server.inject({
       method: 'PUT',
       url: '/api/attendance/2026-11-10',
       headers: jsonAuth,
-      body: { status: 'ABSENT', notes: 'Sick leave' },
+      body: { status: 'LEAVE', notes: 'Personal leave' },
     });
-    assert.equal(absentRes.status, 200);
-    const absent = await absentRes.json();
-    assert.equal(absent.record.status, 'ABSENT');
-    assert.equal(absent.record.trigger_type, 'MANUAL');
-    assert.equal(absent.record.notes, 'Sick leave');
+    assert.equal(leaveRes.status, 200);
+    const leaveData = await leaveRes.json();
+    assert.equal(leaveData.record.status, 'LEAVE');
+    assert.equal(leaveData.record.trigger_type, 'MANUAL');
+    assert.equal(leaveData.record.notes, 'Personal leave');
 
-    // A geofence arrival must not override an explicit manual choice
+    // A geofence arrival must not override an explicit manual leave
     currentClock = new Date('2026-11-10T03:45:00.000Z'); // 09:15 IST
     const arrival = await server.inject({
       method: 'POST',
@@ -230,17 +230,17 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     });
     const arrivalData = await arrival.json();
     assert.equal(arrivalData.already_existed, true);
-    assert.equal(arrivalData.status, 'ABSENT');
+    assert.equal(arrivalData.status, 'LEAVE');
 
-    const presentRes = await server.inject({
+    const wfoRes = await server.inject({
       method: 'PUT',
       url: '/api/attendance/2026-11-10',
       headers: jsonAuth,
-      body: { status: 'PRESENT', time: '09:05' },
+      body: { status: 'WFO', time: '09:05' },
     });
-    const present = await presentRes.json();
-    assert.equal(present.record.status, 'PRESENT');
-    assert.equal(present.record.check_in_time, '09:05:00');
+    const wfoData = await wfoRes.json();
+    assert.equal(wfoData.record.status, 'WFO');
+    assert.equal(wfoData.record.check_in_time, '09:05:00');
 
     const clearRes = await server.inject({
       method: 'PUT',
@@ -252,8 +252,8 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     assert.equal(store.getAttendanceByDate('2026-11-10'), null);
   });
 
-  it('PUT /api/attendance/:date rejects statuses other than PRESENT / ABSENT', async () => {
-    for (const status of ['LATE', 'MANUAL', 'whatever']) {
+  it('PUT /api/attendance/:date rejects statuses other than WFO / WFH / LEAVE', async () => {
+    for (const status of ['PRESENT', 'ABSENT', 'LATE', 'whatever']) {
       const res = await server.inject({
         method: 'PUT',
         url: '/api/attendance/2026-11-11',
@@ -264,7 +264,15 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     }
   });
 
-  it('GET /api/history returns only marked days with present / absent counts', async () => {
+  it('GET /api/history returns monthly stats including wfo, wfh, leave counts, percentages and ratios', async () => {
+    // Add a LEAVE on 2026-11-12
+    await server.inject({
+      method: 'PUT',
+      url: '/api/attendance/2026-11-12',
+      headers: jsonAuth,
+      body: { status: 'LEAVE', notes: 'Doctor appointment' },
+    });
+
     const res = await server.inject({
       method: 'GET',
       url: '/api/history?month=2026-11',
@@ -274,16 +282,17 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
     assert.equal(res.status, 200);
     const data = await res.json();
     assert.equal(data.month, '2026-11');
-    // 05 PRESENT, 06 ABSENT (arrived late), 09 PRESENT (upgraded). 10 was cleared.
-    assert.deepEqual(data.summary, { present: 2, absent: 1 });
-    assert.deepEqual(
-      data.records.map((r) => [r.date, r.status]),
-      [
-        ['2026-11-05', 'PRESENT'],
-        ['2026-11-06', 'ABSENT'],
-        ['2026-11-09', 'PRESENT'],
-      ]
-    );
+    // Marked days: 05 WFO, 06 WFH, 09 WFO, 12 LEAVE -> total = 4 (wfo: 2, wfh: 1, leave: 1)
+    assert.equal(data.summary.total, 4);
+    assert.equal(data.summary.wfo, 2);
+    assert.equal(data.summary.wfh, 1);
+    assert.equal(data.summary.leave, 1);
+    assert.equal(data.summary.wfo_percent, 50);
+    assert.equal(data.summary.wfh_percent, 25);
+    assert.equal(data.summary.leave_percent, 25);
+    assert.equal(data.summary.wfo_ratio, 0.5);
+    assert.equal(data.summary.wfh_ratio, 0.25);
+    assert.equal(data.summary.leave_ratio, 0.25);
   });
 
   it('GET / serves the compiled Web Portal SPA when web/dist exists', async (t) => {
@@ -300,7 +309,7 @@ describe('Attendance Tracker — Server (PRESENT / ABSENT model)', () => {
 });
 
 describe('Attendance Tracker — legacy database migration', () => {
-  it('converts old LATE / MANUAL rows to the PRESENT / ABSENT model', () => {
+  it('converts old rows to the WFO / WFH / LEAVE model', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attendance-migrate-'));
     const dbPath = path.join(dir, 'legacy.db');
 
@@ -308,8 +317,8 @@ describe('Attendance Tracker — legacy database migration', () => {
     legacy.exec(`
       CREATE TABLE attendance_log (
         date TEXT PRIMARY KEY,
-        check_in_time TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('PRESENT', 'LATE', 'MANUAL')),
+        check_in_time TEXT,
+        status TEXT NOT NULL CHECK(status IN ('PRESENT', 'ABSENT')),
         trigger_type TEXT DEFAULT 'GEOFENCE',
         latitude REAL,
         longitude REAL,
@@ -317,20 +326,21 @@ describe('Attendance Tracker — legacy database migration', () => {
       );
       INSERT INTO attendance_log (date, check_in_time, status) VALUES
         ('2026-10-01', '09:10:00', 'PRESENT'),
-        ('2026-10-02', '10:40:00', 'LATE'),
-        ('2026-10-03', '09:00:00', 'MANUAL');
+        ('2026-10-02', '10:40:00', 'ABSENT'),
+        ('2026-10-03', '09:00:00', 'PRESENT');
     `);
     legacy.close();
 
     const migrated = createDatabase(dbPath);
     try {
-      assert.equal(migrated.getAttendanceByDate('2026-10-01').status, 'PRESENT');
-      assert.equal(migrated.getAttendanceByDate('2026-10-02').status, 'ABSENT');
+      assert.equal(migrated.getAttendanceByDate('2026-10-01').status, 'WFO');
+      assert.equal(migrated.getAttendanceByDate('2026-10-02').status, 'WFH');
       assert.equal(migrated.getAttendanceByDate('2026-10-02').check_in_time, '10:40:00');
-      assert.equal(migrated.getAttendanceByDate('2026-10-03').status, 'PRESENT');
+      assert.equal(migrated.getAttendanceByDate('2026-10-03').status, 'WFO');
 
-      // New schema allows ABSENT days with no arrival time
-      assert.equal(migrated.markAbsentIfMissing('2026-10-05'), true);
+      // New schema allows auto-marking WFH
+      assert.equal(migrated.markWfhIfMissing('2026-10-05'), true);
+      assert.equal(migrated.getAttendanceByDate('2026-10-05').status, 'WFH');
     } finally {
       migrated.close();
       fs.rmSync(dir, { recursive: true, force: true });

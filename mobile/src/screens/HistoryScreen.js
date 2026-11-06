@@ -17,7 +17,7 @@ const {
 } = require('../api');
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const STATUS_OPTIONS = ['PRESENT', 'ABSENT'];
+const STATUS_OPTIONS = ['WFO', 'WFH', 'LEAVE'];
 
 function shiftMonth(monthStr, delta) {
   const [y, m] = monthStr.split('-').map(Number);
@@ -40,14 +40,16 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
   const [month, setMonth] = useState(defaultMonth);
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState({
-    present: 0,
-    absent: 0,
+    total: 0,
+    wfo: 0,
+    wfh: 0,
+    leave: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const [selectedDate, setSelectedDate] = useState(todayDateStr);
-  const [editStatus, setEditStatus] = useState('PRESENT');
+  const [editStatus, setEditStatus] = useState('WFO');
   const [editTime, setEditTime] = useState('09:00');
   const [editNote, setEditNote] = useState('');
   const [saving, setSaving] = useState(false);
@@ -59,7 +61,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     try {
       const data = await fetchHistory(targetMonth);
       setRecords(data.records || []);
-      setSummary(data.summary || { present: 0, absent: 0 });
+      setSummary(data.summary || { total: 0, wfo: 0, wfh: 0, leave: 0 });
     } catch (err) {
       setError(err.message || 'Failed to load monthly history.');
     } finally {
@@ -80,11 +82,11 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     const existing = recordMap[selectedDate];
     setSaveMsg(null);
     if (existing) {
-      setEditStatus(existing.status === 'ABSENT' ? 'ABSENT' : 'PRESENT');
+      setEditStatus(existing.status || 'WFO');
       setEditTime((existing.check_in_time || '09:00').slice(0, 5));
       setEditNote(existing.notes || '');
     } else {
-      setEditStatus('PRESENT');
+      setEditStatus('WFO');
       setEditTime(statusData?.settings?.window_start || '09:00');
       setEditNote('');
     }
@@ -133,7 +135,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     try {
       await setDayAttendance(selectedDate, {
         status: editStatus,
-        time: editStatus === 'PRESENT' ? editTime : null,
+        time: editStatus === 'WFO' ? editTime : null,
         notes: editNote.trim() || null,
       });
       setSaveMsg({
@@ -209,18 +211,24 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
         </View>
       </View>
 
-      {/* Summary Stats Row: Present & Absent only */}
+      {/* Summary Stats Row: WFO, WFH, Leave */}
       <View style={styles.statsGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Present Days</Text>
-          <Text style={[styles.statValue, { color: '#059669' }]}>
-            {summary.present}
+          <Text style={styles.statLabel}>WFO (Office)</Text>
+          <Text style={[styles.statValue, { color: '#2563eb' }]}>
+            {summary.wfo || 0}
           </Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Absent Days</Text>
+          <Text style={styles.statLabel}>WFH (Home)</Text>
+          <Text style={[styles.statValue, { color: '#059669' }]}>
+            {summary.wfh || 0}
+          </Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Leave</Text>
           <Text style={[styles.statValue, { color: '#e11d48' }]}>
-            {summary.absent}
+            {summary.leave || 0}
           </Text>
         </View>
       </View>
@@ -263,10 +271,13 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
                 let cellBg = '#f8fafc';
 
                 if (cell.rec) {
-                  if (cell.rec.status === 'PRESENT') {
+                  if (cell.rec.status === 'WFO') {
+                    dotColor = '#2563eb';
+                    cellBg = '#eff6ff';
+                  } else if (cell.rec.status === 'WFH') {
                     dotColor = '#10b981';
                     cellBg = '#ecfdf5';
-                  } else if (cell.rec.status === 'ABSENT') {
+                  } else if (cell.rec.status === 'LEAVE') {
                     dotColor = '#f43f5e';
                     cellBg = '#fff1f2';
                   }
@@ -308,16 +319,20 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
         {/* Legend */}
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
+            <View style={[styles.dot, { backgroundColor: '#2563eb' }]} />
+            <Text style={styles.legendText}>WFO</Text>
+          </View>
+          <View style={styles.legendItem}>
             <View style={[styles.dot, { backgroundColor: '#10b981' }]} />
-            <Text style={styles.legendText}>Present</Text>
+            <Text style={styles.legendText}>WFH</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.dot, { backgroundColor: '#f43f5e' }]} />
-            <Text style={styles.legendText}>Absent</Text>
+            <Text style={styles.legendText}>Leave</Text>
           </View>
           <View style={styles.legendItem}>
             <Text style={[styles.legendText, { color: '#94a3b8' }]}>
-              (Unmarked days stay clean)
+              (Unmarked clean)
             </Text>
           </View>
         </View>
@@ -367,20 +382,20 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
           {selectedRecord ? 'Update Day Record' : 'Record Day Attendance'}
         </Text>
 
-        {/* Status Selector Pills: PRESENT vs ABSENT */}
+        {/* Status Selector Pills: WFO, WFH, LEAVE */}
         <View style={styles.statusSelectorRow}>
           {STATUS_OPTIONS.map((opt) => {
             const active = editStatus === opt;
-            const isPresent = opt === 'PRESENT';
+            let activeStyle = styles.statusOptBtnActiveBlue;
+            if (opt === 'WFH') activeStyle = styles.statusOptBtnActiveGreen;
+            if (opt === 'LEAVE') activeStyle = styles.statusOptBtnActiveRose;
+
             return (
               <TouchableOpacity
                 key={opt}
                 style={[
                   styles.statusOptBtn,
-                  active &&
-                    (isPresent
-                      ? styles.statusOptBtnActiveGreen
-                      : styles.statusOptBtnActiveRose),
+                  active && activeStyle,
                 ]}
                 onPress={() => setEditStatus(opt)}
               >
@@ -397,7 +412,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
           })}
         </View>
 
-        {editStatus === 'PRESENT' && (
+        {editStatus === 'WFO' && (
           <>
             <Text style={styles.inputLabel}>Arrival Time (24h HH:MM)</Text>
             <TextInput
@@ -473,8 +488,8 @@ const styles = StyleSheet.create({
   },
   monthHeader: {
     backgroundColor: '#ffffff',
-    borderRadius: 18,
-    padding: 16,
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     flexDirection: 'row',
@@ -482,7 +497,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   monthTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
     color: '#0f172a',
   },
@@ -499,40 +514,40 @@ const styles = StyleSheet.create({
   navBtn: {
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 10,
-    width: 34,
-    height: 34,
+    borderRadius: 8,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
   navBtnText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#334155',
   },
   todayBtn: {
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 34,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
   todayBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#334155',
   },
   statsGrid: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
   statCard: {
     flex: 1,
     backgroundColor: '#ffffff',
     borderRadius: 14,
-    padding: 14,
+    padding: 12,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
@@ -542,16 +557,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '800',
-    marginTop: 4,
+    marginTop: 2,
   },
   errorBox: {
     backgroundColor: '#fff1f2',
     borderColor: '#fecdd3',
     borderWidth: 1,
-    padding: 12,
-    borderRadius: 12,
+    padding: 10,
+    borderRadius: 10,
   },
   errorText: {
     color: '#9f1239',
@@ -559,7 +574,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
@@ -588,10 +603,10 @@ const styles = StyleSheet.create({
   dayCell: {
     flex: 1,
     aspectRatio: 1,
-    borderRadius: 10,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
@@ -624,7 +639,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   legendItem: {
     flexDirection: 'row',
@@ -642,16 +657,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   inspectorDate: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
     color: '#0f172a',
     marginTop: 2,
   },
   recordDetailBox: {
     backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 10,
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 8,
     gap: 6,
   },
   detailRow: {
@@ -670,13 +685,13 @@ const styles = StyleSheet.create({
   noRecordText: {
     fontSize: 12,
     color: '#64748b',
-    marginTop: 10,
+    marginTop: 8,
   },
   formSectionLabel: {
     fontSize: 13,
     fontWeight: '700',
     color: '#1e293b',
-    marginTop: 14,
+    marginTop: 12,
     marginBottom: 8,
   },
   statusSelectorRow: {
@@ -686,20 +701,24 @@ const styles = StyleSheet.create({
   },
   statusOptBtn: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 9,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     backgroundColor: '#f8fafc',
     alignItems: 'center',
   },
+  statusOptBtnActiveBlue: {
+    backgroundColor: '#2563eb',
+    borderColor: '#2563eb',
+  },
   statusOptBtnActiveGreen: {
-    backgroundColor: '#059669',
-    borderColor: '#059669',
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
   },
   statusOptBtnActiveRose: {
-    backgroundColor: '#e11d48',
-    borderColor: '#e11d48',
+    backgroundColor: '#f43f5e',
+    borderColor: '#f43f5e',
   },
   statusOptText: {
     fontSize: 12,
@@ -710,7 +729,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   inputLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#475569',
     marginBottom: 4,
@@ -719,9 +738,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 12,
+    borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingVertical: 8,
     fontSize: 13,
     color: '#0f172a',
     marginBottom: 10,
@@ -732,8 +751,8 @@ const styles = StyleSheet.create({
   },
   saveBtn: {
     backgroundColor: '#4f46e5',
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderRadius: 10,
+    paddingVertical: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -746,13 +765,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#f1f5f9',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 12,
-    paddingVertical: 10,
+    borderRadius: 10,
+    paddingVertical: 9,
     alignItems: 'center',
   },
   clearBtnText: {
     color: '#475569',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   saveMsgText: {

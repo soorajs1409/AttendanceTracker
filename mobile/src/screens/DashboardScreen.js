@@ -1,31 +1,43 @@
 const React = require('react');
-const { useState } = React;
+const { useState, useEffect, useCallback } = React;
 const {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   RefreshControl,
   StyleSheet,
   ActivityIndicator,
 } = require('react-native');
-const Location = require('expo-location');
+const { WebView } = require('react-native-webview');
 const {
-  submitCheckIn,
-  setDayAttendance,
-  flushPendingCheckIns,
+  fetchHistory,
   formatTime12h,
   formatDateReadable,
 } = require('../api');
 
+function shiftMonth(monthStr, delta) {
+  const [y, m] = monthStr.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatMonthLabel(monthStr) {
+  const [y, m] = monthStr.split('-').map(Number);
+  const d = new Date(y, m - 1, 1);
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
 function StatusBadge({ status }) {
   let bg = '#f1f5f9';
   let fg = '#334155';
-  if (status === 'PRESENT') {
+  if (status === 'WFO') {
+    bg = '#dbeafe';
+    fg = '#1e40af';
+  } else if (status === 'WFH') {
     bg = '#d1fae5';
     fg = '#065f46';
-  } else if (status === 'ABSENT') {
+  } else if (status === 'LEAVE') {
     bg = '#ffe4e6';
     fg = '#9f1239';
   }
@@ -37,288 +49,291 @@ function StatusBadge({ status }) {
   );
 }
 
-function DashboardScreen({
-  statusData,
-  loading,
-  geofenceState,
-  pendingCount,
-  onRefresh,
-  onNavigateSettings,
-}) {
-  const [note, setNote] = useState('');
-  const [checkingIn, setCheckingIn] = useState(false);
-  const [syncingQueue, setSyncingQueue] = useState(false);
-  const [feedback, setFeedback] = useState(null);
-
-  const today = statusData?.today || {};
-  const settings = statusData?.settings || {};
-  const recent = (statusData?.recent || []).slice(0, 5);
-
-  const isLocationConfigured =
-    Number(settings.work_latitude || 0) !== 0 ||
-    Number(settings.work_longitude || 0) !== 0;
-
-  let bannerBg = '#4338ca'; // Indigo awaiting
-  let bannerTitle = '⏳ Awaiting Arrival';
-  let bannerSub = `Target Window: ${formatTime12h(
-    settings.window_start
-  )} – ${formatTime12h(settings.window_end)}`;
-
-  if (today.status === 'PRESENT') {
-    bannerBg = '#059669'; // Emerald present
-    bannerTitle = `✅ Marked Present at ${formatTime12h(today.check_in_time)}`;
-    bannerSub = `Logged via ${today.trigger_type || 'GEOFENCE'} • ${
-      settings.work_name || 'Office'
-    }`;
-  } else if (today.status === 'ABSENT') {
-    bannerBg = '#e11d48'; // Rose absent
-    bannerTitle = '❌ Marked Absent Today';
-    bannerSub = today.check_in_time
-      ? `Arrived at ${formatTime12h(today.check_in_time)} (after window closed)`
-      : `Did not reach destination by ${formatTime12h(settings.window_end)}`;
-  } else if (today.is_work_day === false) {
-    bannerBg = '#334155'; // Slate off-day
-    bannerTitle = '🏖️ Non-Working Day';
-    bannerSub = 'Enjoy your day off! Automatic window resumes next workday.';
+function PieChartSection({ wfo, wfh, leave, total }) {
+  if (!total || total === 0) {
+    return (
+      <View style={styles.emptyChartBox}>
+        <Text style={styles.emptyChartText}>
+          No attendance records for this month yet.
+        </Text>
+      </View>
+    );
   }
 
-  async function handleManualCheckIn() {
-    setCheckingIn(true);
-    setFeedback(null);
+  const r = 35;
+  const circumference = 2 * Math.PI * r;
+  const wfoLen = (wfo / total) * circumference;
+  const wfhLen = (wfh / total) * circumference;
+  const leaveLen = (leave / total) * circumference;
+  const wfoOffset = 0;
+  const wfhOffset = -wfoLen;
+  const leaveOffset = -(wfoLen + wfhLen);
 
-    let coords = {};
+  const wfoPct = Math.round((wfo / total) * 100);
+  const wfhPct = Math.round((wfh / total) * 100);
+  const leavePct = Math.round((leave / total) * 100);
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #ffffff;
+            height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          }
+          .container { position: relative; width: 170px; height: 170px; }
+          svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+          .center {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+          }
+          .total { font-size: 24px; font-weight: 800; color: #0f172a; }
+          .sub { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <svg viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="22" />
+            ${wfo > 0 ? `<circle cx="50" cy="50" r="${r}" fill="none" stroke="#2563eb" stroke-width="22" stroke-dasharray="${wfoLen} ${circumference}" stroke-dashoffset="${wfoOffset}" />` : ''}
+            ${wfh > 0 ? `<circle cx="50" cy="50" r="${r}" fill="none" stroke="#10b981" stroke-width="22" stroke-dasharray="${wfhLen} ${circumference}" stroke-dashoffset="${wfhOffset}" />` : ''}
+            ${leave > 0 ? `<circle cx="50" cy="50" r="${r}" fill="none" stroke="#f43f5e" stroke-width="22" stroke-dasharray="${leaveLen} ${circumference}" stroke-dashoffset="${leaveOffset}" />` : ''}
+          </svg>
+          <div class="center">
+            <div class="total">${total}</div>
+            <div class="sub">Days</div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  return (
+    <View style={styles.chartWrapper}>
+      <View style={styles.webViewContainer}>
+        <WebView
+          originWhitelist={['*']}
+          source={{ html }}
+          style={styles.webView}
+          scrollEnabled={false}
+        />
+      </View>
+
+      {/* Segmented bar visual */}
+      <View style={styles.barTrack}>
+        {wfo > 0 && <View style={[styles.barSlice, { flex: wfo, backgroundColor: '#2563eb' }]} />}
+        {wfh > 0 && <View style={[styles.barSlice, { flex: wfh, backgroundColor: '#10b981' }]} />}
+        {leave > 0 && <View style={[styles.barSlice, { flex: leave, backgroundColor: '#f43f5e' }]} />}
+      </View>
+
+      {/* Legend */}
+      <View style={styles.legendContainer}>
+        <View style={styles.legendRow}>
+          <View style={styles.legendLeft}>
+            <View style={[styles.legendDot, { backgroundColor: '#2563eb' }]} />
+            <Text style={styles.legendLabel}>WFO (Office)</Text>
+          </View>
+          <Text style={styles.legendVal}>{wfo} days ({wfoPct}%)</Text>
+        </View>
+
+        <View style={styles.legendRow}>
+          <View style={styles.legendLeft}>
+            <View style={[styles.legendDot, { backgroundColor: '#10b981' }]} />
+            <Text style={styles.legendLabel}>WFH (Home)</Text>
+          </View>
+          <Text style={styles.legendVal}>{wfh} days ({wfhPct}%)</Text>
+        </View>
+
+        <View style={styles.legendRow}>
+          <View style={styles.legendLeft}>
+            <View style={[styles.legendDot, { backgroundColor: '#f43f5e' }]} />
+            <Text style={styles.legendLabel}>Leave</Text>
+          </View>
+          <Text style={styles.legendVal}>{leave} days ({leavePct}%)</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function DashboardScreen({ statusData }) {
+  const todayDateStr =
+    statusData?.today?.date || new Date().toISOString().slice(0, 10);
+  const defaultMonth = todayDateStr.slice(0, 7);
+
+  const [month, setMonth] = useState(defaultMonth);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [historyData, setHistoryData] = useState({
+    summary: { total: 0, wfo: 0, wfh: 0, leave: 0, wfo_percent: 0, wfh_percent: 0, leave_percent: 0 },
+    records: [],
+  });
+
+  const loadData = useCallback(async (targetMonth) => {
+    setLoading(true);
+    setError(null);
     try {
-      const perm = await Location.getForegroundPermissionsAsync();
-      if (perm.status === 'granted') {
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        coords = {
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-        };
-      }
-    } catch {
-      // Proceed cleanly without GPS coordinates
-    }
-
-    try {
-      const res = await submitCheckIn({
-        ...coords,
-        trigger: 'MANUAL',
-        notes: note.trim() || undefined,
-      });
-
-      setFeedback({
-        type: 'success',
-        message: res.already_existed
-          ? `Already recorded for today (${res.status} at ${formatTime12h(res.time)}).`
-          : `Checked in at ${formatTime12h(res.time)} — marked ${res.status}!`,
-      });
-      setNote('');
-      if (onRefresh) await onRefresh();
+      const data = await fetchHistory(targetMonth);
+      setHistoryData(data);
     } catch (err) {
-      setFeedback({
-        type: 'error',
-        message: err.message || 'Failed to check in.',
-      });
+      setError(err.message || 'Failed to load month statistics.');
     } finally {
-      setCheckingIn(false);
+      setLoading(false);
     }
-  }
+  }, []);
 
-  async function handleMarkAbsentToday() {
-    if (!today.date) return;
-    setCheckingIn(true);
-    setFeedback(null);
-    try {
-      await setDayAttendance(today.date, {
-        status: 'ABSENT',
-        notes: note.trim() || 'Marked absent manually',
-      });
-      setFeedback({
-        type: 'success',
-        message: `Marked today (${today.date}) as ABSENT.`,
-      });
-      setNote('');
-      if (onRefresh) await onRefresh();
-    } catch (err) {
-      setFeedback({
-        type: 'error',
-        message: err.message || 'Failed to mark absent.',
-      });
-    } finally {
-      setCheckingIn(false);
-    }
-  }
+  useEffect(() => {
+    loadData(month);
+  }, [month, loadData]);
 
-  async function handleFlushQueue() {
-    setSyncingQueue(true);
-    try {
-      await flushPendingCheckIns();
-      if (onRefresh) await onRefresh();
-    } finally {
-      setSyncingQueue(false);
-    }
-  }
+  const summary = historyData?.summary || {
+    total: 0,
+    wfo: 0,
+    wfh: 0,
+    leave: 0,
+    wfo_percent: 0,
+    wfh_percent: 0,
+    leave_percent: 0,
+  };
+  const records = historyData?.records || [];
+
+  const total = summary.total || 0;
+  const wfo = summary.wfo || 0;
+  const wfh = summary.wfh || 0;
+  const leave = summary.leave || 0;
+
+  const wfoRatio = total > 0 ? (wfo / total).toFixed(2) : '0.00';
+  const wfhRatio = total > 0 ? (wfh / total).toFixed(2) : '0.00';
+  const leaveRatio = total > 0 ? (leave / total).toFixed(2) : '0.00';
+  const wfoToWfh = wfh > 0 ? (wfo / wfh).toFixed(2) : wfo > 0 ? `${wfo}:0` : '0:0';
 
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
-        <RefreshControl refreshing={Boolean(loading)} onRefresh={onRefresh} />
+        <RefreshControl refreshing={loading} onRefresh={() => loadData(month)} />
       }
     >
-      {/* Unconfigured Destination Callout */}
-      {!isLocationConfigured && statusData && (
-        <View style={styles.warningCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.warningTitle}>
-              Work destination not configured
-            </Text>
-            <Text style={styles.warningSub}>
-              Drop a pin on the map in Settings to arm automatic geofence check-ins.
-            </Text>
-          </View>
+      {/* Month Switcher Header */}
+      <View style={styles.headerCard}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>{formatMonthLabel(month)}</Text>
+          <Text style={styles.headerSub}>Monthly Statistics & Pie Chart</Text>
+        </View>
+
+        <View style={styles.navGroup}>
           <TouchableOpacity
-            style={styles.warningBtn}
-            onPress={onNavigateSettings}
+            style={styles.navBtn}
+            onPress={() => setMonth(shiftMonth(month, -1))}
           >
-            <Text style={styles.warningBtnText}>Set Location</Text>
+            <Text style={styles.navBtnText}>‹</Text>
           </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Offline Queue Sync Callout */}
-      {pendingCount > 0 && (
-        <View style={styles.queueCard}>
-          <Text style={styles.queueText}>
-            {pendingCount} offline arrival(s) waiting to sync
-          </Text>
           <TouchableOpacity
-            style={styles.queueBtn}
-            onPress={handleFlushQueue}
-            disabled={syncingQueue}
+            style={styles.todayBtn}
+            onPress={() => setMonth(defaultMonth)}
           >
-            <Text style={styles.queueBtnText}>
-              {syncingQueue ? 'Syncing...' : 'Sync Now'}
-            </Text>
+            <Text style={styles.todayBtnText}>Today</Text>
           </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Big Today Banner */}
-      <View style={[styles.banner, { backgroundColor: bannerBg }]}>
-        <View style={styles.datePill}>
-          <Text style={styles.datePillText}>
-            {formatDateReadable(today.date) || 'Today'}
-          </Text>
-        </View>
-
-        <Text style={styles.bannerTitle}>{bannerTitle}</Text>
-        <Text style={styles.bannerSub}>{bannerSub}</Text>
-
-        {today.notes ? (
-          <View style={styles.notePill}>
-            <Text style={styles.notePillText}>Note: {today.notes}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.bannerFooter}>
-          <Text style={styles.bannerFooterText}>
-            📍 {settings.work_name || 'Office'}{' '}
-            {isLocationConfigured ? `(${settings.radius_meters}m)` : ''}
-          </Text>
-          <Text style={styles.bannerFooterText}>
-            {geofenceState?.active
-              ? '🛰️ Geofence Armed'
-              : '⚠️ Geofence Inactive'}
-          </Text>
+          <TouchableOpacity
+            style={styles.navBtn}
+            onPress={() => setMonth(shiftMonth(month, 1))}
+          >
+            <Text style={styles.navBtnText}>›</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Manual Actions Card */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Manual Actions</Text>
-        <Text style={styles.cardSub}>
-          Check in present or mark absent if GPS was missed or you are taking time off.
-        </Text>
+      {error ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
 
-        <TextInput
-          style={styles.input}
-          value={note}
-          onChangeText={setNote}
-          placeholder="Optional note (e.g., Working remotely / Doctor appointment)"
-          placeholderTextColor="#94a3b8"
-          editable={!checkingIn}
-        />
-
-        <View style={styles.actionBtnRow}>
-          <TouchableOpacity
-            style={[
-              styles.primaryBtn,
-              { flex: 1 },
-              checkingIn && styles.disabledBtn,
-            ]}
-            onPress={handleManualCheckIn}
-            disabled={checkingIn}
-          >
-            {checkingIn ? (
-              <ActivityIndicator color="#ffffff" size="small" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Check In (Present)</Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.absentBtn,
-              { flex: 1 },
-              checkingIn && styles.disabledBtn,
-            ]}
-            onPress={handleMarkAbsentToday}
-            disabled={checkingIn}
-          >
-            <Text style={styles.absentBtnText}>Mark Absent</Text>
-          </TouchableOpacity>
+      {/* 4 Primary Metric Cards */}
+      <View style={styles.metricsGrid}>
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>WFO (Office)</Text>
+          <Text style={[styles.metricVal, { color: '#2563eb' }]}>{wfo}</Text>
+          <Text style={styles.metricSub}>{summary.wfo_percent || 0}% • ratio {wfoRatio}</Text>
         </View>
 
-        {feedback && (
-          <View
-            style={[
-              styles.feedbackBox,
-              feedback.type === 'success'
-                ? styles.feedbackSuccess
-                : styles.feedbackError,
-            ]}
-          >
-            <Text
-              style={[
-                styles.feedbackText,
-                feedback.type === 'success'
-                  ? { color: '#065f46' }
-                  : { color: '#9f1239' },
-              ]}
-            >
-              {feedback.message}
-            </Text>
-          </View>
-        )}
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>WFH (Home)</Text>
+          <Text style={[styles.metricVal, { color: '#059669' }]}>{wfh}</Text>
+          <Text style={styles.metricSub}>{summary.wfh_percent || 0}% • ratio {wfhRatio}</Text>
+        </View>
+
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>Leave</Text>
+          <Text style={[styles.metricVal, { color: '#e11d48' }]}>{leave}</Text>
+          <Text style={styles.metricSub}>{summary.leave_percent || 0}% • ratio {leaveRatio}</Text>
+        </View>
+
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>Total Tracked</Text>
+          <Text style={[styles.metricVal, { color: '#0f172a' }]}>{total}</Text>
+          <Text style={styles.metricSub}>WFO:WFH {wfoToWfh}</Text>
+        </View>
       </View>
 
-      {/* Recent 5-Day Summary */}
+      {/* Pie Chart Card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Recent Attendance</Text>
+        <Text style={styles.cardTitle}>Attendance Pie Chart</Text>
+        <Text style={styles.cardSub}>Percentage and ratio breakdown</Text>
+        <PieChartSection wfo={wfo} wfh={wfh} leave={leave} total={total} />
+      </View>
 
-        {recent.length === 0 ? (
+      {/* Ratios & Necessary Statistics */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Monthly Ratios & Metrics</Text>
+        <View style={styles.ratioRows}>
+          <View style={styles.ratioRow}>
+            <Text style={styles.ratioKey}>Work from Office Ratio</Text>
+            <Text style={[styles.ratioVal, { color: '#2563eb' }]}>
+              {wfoRatio} ({wfo}/{total || 1})
+            </Text>
+          </View>
+          <View style={styles.ratioRow}>
+            <Text style={styles.ratioKey}>Work from Home Ratio</Text>
+            <Text style={[styles.ratioVal, { color: '#059669' }]}>
+              {wfhRatio} ({wfh}/{total || 1})
+            </Text>
+          </View>
+          <View style={styles.ratioRow}>
+            <Text style={styles.ratioKey}>Leave Ratio</Text>
+            <Text style={[styles.ratioVal, { color: '#e11d48' }]}>
+              {leaveRatio} ({leave}/{total || 1})
+            </Text>
+          </View>
+          <View style={styles.ratioRow}>
+            <Text style={styles.ratioKey}>Office vs Remote (WFO : WFH)</Text>
+            <Text style={styles.ratioVal}>{wfoToWfh}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Days Logged in this Month */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Days in {formatMonthLabel(month)} ({records.length})</Text>
+
+        {records.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>
-              No check-ins recorded yet. Your arrivals will appear here automatically.
-            </Text>
+            <Text style={styles.emptyText}>No attendance records for this month.</Text>
           </View>
         ) : (
-          recent.map((item, idx) => (
+          records.map((item, idx) => (
             <View
               key={item.date}
               style={[
@@ -332,7 +347,7 @@ function DashboardScreen({
                 </Text>
                 <Text style={styles.recentMeta} numberOfLines={1}>
                   {item.check_in_time
-                    ? `Arrived at ${formatTime12h(item.check_in_time)}`
+                    ? `Arrival: ${formatTime12h(item.check_in_time)}`
                     : 'No arrival time logged'}{' '}
                   • {item.trigger_type || 'MANUAL'}
                   {item.notes ? ` — "${item.notes}"` : ''}
@@ -355,238 +370,245 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-    gap: 16,
+    gap: 14,
   },
-  warningCard: {
-    backgroundColor: '#fffbeb',
-    borderColor: '#fde68a',
-    borderWidth: 1,
-    borderRadius: 16,
+  headerCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
     padding: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
   },
-  warningTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#78350f',
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0f172a',
   },
-  warningSub: {
-    fontSize: 12,
-    color: '#92400e',
+  headerSub: {
+    fontSize: 11,
+    color: '#64748b',
     marginTop: 2,
   },
-  warningBtn: {
-    backgroundColor: '#d97706',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  warningBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  queueCard: {
-    backgroundColor: '#eef2ff',
-    borderColor: '#c7d2fe',
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 12,
+  navGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 6,
   },
-  queueText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#3730a3',
-  },
-  queueBtn: {
-    backgroundColor: '#4f46e5',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  navBtn: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     borderRadius: 8,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  queueBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
+  navBtnText: {
+    fontSize: 16,
     fontWeight: '700',
+    color: '#334155',
   },
-  banner: {
-    borderRadius: 22,
-    padding: 20,
+  todayBtn: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  datePill: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    marginBottom: 10,
+  todayBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155',
   },
-  datePillText: {
-    color: '#ffffff',
+  errorBox: {
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+    borderWidth: 1,
+    padding: 10,
+    borderRadius: 10,
+  },
+  errorText: {
+    color: '#9f1239',
     fontSize: 12,
-    fontWeight: '600',
   },
-  bannerTitle: {
-    color: '#ffffff',
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  metricCard: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  metricLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  metricVal: {
     fontSize: 22,
     fontWeight: '800',
+    marginTop: 2,
   },
-  bannerSub: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  notePill: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.18)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  notePillText: {
-    color: '#ffffff',
-    fontSize: 12,
-  },
-  bannerFooter: {
-    marginTop: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.2)',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  bannerFooterText: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 12,
-    fontWeight: '600',
+  metricSub: {
+    fontSize: 10,
+    color: '#64748b',
+    marginTop: 2,
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#0f172a',
   },
   cardSub: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#64748b',
     marginTop: 2,
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#0f172a',
     marginBottom: 10,
   },
-  actionBtnRow: {
+  chartWrapper: {
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  webViewContainer: {
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    overflow: 'hidden',
+  },
+  webView: {
+    width: 170,
+    height: 170,
+    backgroundColor: 'transparent',
+  },
+  barTrack: {
     flexDirection: 'row',
-    gap: 10,
+    height: 8,
+    width: '100%',
+    borderRadius: 4,
+    overflow: 'hidden',
+    backgroundColor: '#f1f5f9',
+    marginTop: 14,
+    marginBottom: 10,
   },
-  primaryBtn: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 12,
-    paddingVertical: 12,
+  barSlice: {
+    height: '100%',
+  },
+  emptyChartBox: {
+    paddingVertical: 24,
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  disabledBtn: {
-    backgroundColor: '#cbd5e1',
+  emptyChartText: {
+    fontSize: 12,
+    color: '#94a3b8',
   },
-  primaryBtnText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700',
+  legendContainer: {
+    width: '100%',
+    gap: 8,
+    marginTop: 4,
   },
-  absentBtn: {
-    backgroundColor: '#fff1f2',
-    borderColor: '#fecdd3',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
+  legendRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
   },
-  absentBtnText: {
-    color: '#e11d48',
-    fontSize: 14,
-    fontWeight: '700',
+  legendLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  feedbackBox: {
-    marginTop: 10,
-    padding: 10,
-    borderRadius: 10,
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 3,
   },
-  feedbackSuccess: {
-    backgroundColor: '#ecfdf5',
-  },
-  feedbackError: {
-    backgroundColor: '#fff1f2',
-  },
-  feedbackText: {
+  legendLabel: {
     fontSize: 12,
     fontWeight: '600',
+    color: '#334155',
+  },
+  legendVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  ratioRows: {
+    gap: 8,
+    marginTop: 4,
+  },
+  ratioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f8fafc',
+  },
+  ratioKey: {
+    fontSize: 12,
+    color: '#64748b',
+  },
+  ratioVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
   },
   emptyBox: {
-    marginTop: 12,
-    paddingVertical: 20,
+    marginTop: 8,
+    paddingVertical: 16,
     alignItems: 'center',
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: '#cbd5e1',
-    borderRadius: 12,
   },
   emptyText: {
-    fontSize: 13,
-    color: '#64748b',
-    textAlign: 'center',
-    paddingHorizontal: 16,
+    fontSize: 12,
+    color: '#94a3b8',
   },
   recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   recentRowBorder: {
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
   },
   recentDate: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#0f172a',
   },
   recentMeta: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#64748b',
     marginTop: 2,
   },
   badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
   badgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
   },
 });

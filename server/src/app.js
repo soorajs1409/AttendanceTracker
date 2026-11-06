@@ -95,7 +95,8 @@ function createApp({
 }) {
   /**
    * If today is a workday, the arrival window has closed, and nothing is recorded
-   * for today, mark today ABSENT. Safe to call repeatedly (idempotent).
+   * for today, mark today WFH (auto-selected). Safe to call repeatedly (idempotent).
+   * Note: 'LEAVE' is never auto-set; it requires explicit user action.
    */
   function runAbsenceCheck() {
     const settings = store.getSettings();
@@ -109,7 +110,7 @@ function createApp({
     if (localNow.shortTime <= settings.window_end) {
       return { marked: false, reason: 'window_open' };
     }
-    const marked = store.markAbsentIfMissing(localNow.date);
+    const marked = store.markWfhIfMissing(localNow.date);
     return { marked, date: localNow.date };
   }
 
@@ -308,9 +309,24 @@ function createApp({
         }
 
         const records = store.getMonthlyAttendance(requestedMonth);
+        const wfo = records.filter((r) => r.status === 'WFO').length;
+        const wfh = records.filter((r) => r.status === 'WFH').length;
+        const leave = records.filter((r) => r.status === 'LEAVE').length;
+        const total = wfo + wfh + leave;
+
         const summary = {
-          present: records.filter((r) => r.status === 'PRESENT').length,
-          absent: records.filter((r) => r.status === 'ABSENT').length,
+          total,
+          wfo,
+          wfh,
+          leave,
+          // Percentages (rounded to 1 decimal place)
+          wfo_percent: total ? Math.round((wfo / total) * 1000) / 10 : 0,
+          wfh_percent: total ? Math.round((wfh / total) * 1000) / 10 : 0,
+          leave_percent: total ? Math.round((leave / total) * 1000) / 10 : 0,
+          // Ratios relative to total (0.00 to 1.00)
+          wfo_ratio: total ? Math.round((wfo / total) * 100) / 100 : 0,
+          wfh_ratio: total ? Math.round((wfh / total) * 100) / 100 : 0,
+          leave_ratio: total ? Math.round((leave / total) * 100) / 100 : 0,
         };
 
         sendJson(res, 200, {
@@ -321,7 +337,7 @@ function createApp({
         return;
       }
 
-      // 4. PUT /api/attendance/YYYY-MM-DD — manually mark a day PRESENT / ABSENT, or clear it
+      // 4. PUT /api/attendance/YYYY-MM-DD — manually mark a day WFO / WFH / LEAVE, or clear it
       const dayMatch = pathname.match(/^\/api\/attendance\/(\d{4}-\d{2}-\d{2})$/);
       if (req.method === 'PUT' && dayMatch) {
         const date = dayMatch[1];
@@ -345,9 +361,9 @@ function createApp({
         }
 
         const status = String(body.status || '').toUpperCase();
-        if (!['PRESENT', 'ABSENT'].includes(status)) {
+        if (!['WFO', 'WFH', 'LEAVE'].includes(status)) {
           sendJson(res, 400, {
-            error: "status must be 'PRESENT', 'ABSENT', or null to clear the day",
+            error: "status must be 'WFO', 'WFH', 'LEAVE', or null to clear the day",
           });
           return;
         }

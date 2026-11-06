@@ -147,7 +147,7 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     assert.equal(notificationsSent.length, 0);
   });
 
-  it('marks PRESENT on workday geofence entry and suppresses duplicate lunch re-entry notifications', async () => {
+  it('marks WFO on workday geofence entry and suppresses duplicate lunch re-entry notifications', async () => {
     // Thursday Nov 5, 2026 at 09:12 local
     const thursdayMorning = new Date(2026, 10, 5, 9, 12, 0);
     const out1 = await processGeofenceEnterEvent(
@@ -161,12 +161,12 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
 
     assert.equal(out1.skipped, false);
     assert.equal(out1.queuedOffline, false);
-    assert.equal(out1.result.status, 'PRESENT');
+    assert.equal(out1.result.status, 'WFO');
     assert.equal(out1.result.already_existed, false);
     assert.equal(notificationsSent.length, 1);
-    assert.ok(notificationsSent[0].content.title.includes('Marked Present'));
+    assert.ok(notificationsSent[0].content.title.includes('Marked WFO'));
 
-    // Re-enter after lunch at 13:30 — must remain PRESENT at 09:12 and send 0 new notifications
+    // Re-enter after lunch at 13:30 — must remain WFO at 09:12 and send 0 new notifications
     const postLunch = new Date(2026, 10, 5, 13, 30, 0);
     const out2 = await processGeofenceEnterEvent(
       { latitude: 12.9717, longitude: 77.5945, now: postLunch },
@@ -178,7 +178,7 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     );
 
     assert.equal(out2.result.already_existed, true);
-    assert.equal(out2.result.status, 'PRESENT');
+    assert.equal(out2.result.status, 'WFO');
     assert.equal(notificationsSent.length, 1);
   });
 
@@ -203,7 +203,7 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     assert.equal(pendingBefore[0].date, '2026-11-06');
     assert.equal(pendingBefore[0].time, '09:25:15');
 
-    // Reconnect 2 hours later (11:25 IST) — queued 09:25:15 timestamp must still evaluate as PRESENT!
+    // Reconnect 2 hours later (11:25 IST) — queued 09:25:15 timestamp must still evaluate as WFO!
     simulateNetworkOutage = false;
     serverClock = new Date('2026-11-06T05:55:00.000Z');
 
@@ -216,10 +216,10 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
 
     const savedRecord = dbStore.getAttendanceByDate('2026-11-06');
     assert.equal(savedRecord.check_in_time, '09:25:15');
-    assert.equal(savedRecord.status, 'PRESENT');
+    assert.equal(savedRecord.status, 'WFO');
   });
 
-  it('marks ABSENT on workday geofence entry after window has closed', async () => {
+  it('marks WFH on workday geofence entry after window has closed', async () => {
     // Monday Nov 9, 2026 at 10:15 local (window ends at 10:00)
     serverClock = new Date('2026-11-09T04:45:00.000Z');
     const lateArrival = new Date(2026, 10, 9, 10, 15, 0);
@@ -234,24 +234,24 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     );
 
     assert.equal(out.skipped, false);
-    assert.equal(out.result.status, 'ABSENT');
+    assert.equal(out.result.status, 'WFH');
     const saved = dbStore.getAttendanceByDate('2026-11-09');
-    assert.equal(saved.status, 'ABSENT');
+    assert.equal(saved.status, 'WFH');
     assert.equal(saved.check_in_time, '10:15:00');
-    assert.ok(notificationsSent[notificationsSent.length - 1].content.title.includes('Marked Absent'));
+    assert.ok(notificationsSent[notificationsSent.length - 1].content.title.includes('Marked WFH'));
   });
 
-  it('allows mobile setDayAttendance to manually mark ABSENT and unmark a day', async () => {
-    // Manually mark Nov 10 as ABSENT
-    const resAbsent = await setDayAttendance(
+  it('allows mobile setDayAttendance to manually mark LEAVE, WFH, and unmark a day', async () => {
+    // Manually mark Nov 10 as LEAVE
+    const resLeave = await setDayAttendance(
       '2026-11-10',
-      { status: 'ABSENT', notes: 'Personal leave' },
+      { status: 'LEAVE', notes: 'Personal leave' },
       { storage: mobileStorage, fetchImpl: fetchBridge }
     );
-    assert.equal(resAbsent.success, true);
-    assert.equal(resAbsent.record.status, 'ABSENT');
+    assert.equal(resLeave.success, true);
+    assert.equal(resLeave.record.status, 'LEAVE');
     let rec = dbStore.getAttendanceByDate('2026-11-10');
-    assert.equal(rec.status, 'ABSENT');
+    assert.equal(rec.status, 'LEAVE');
     assert.equal(rec.notes, 'Personal leave');
 
     // Unmark Nov 10 (status: null)

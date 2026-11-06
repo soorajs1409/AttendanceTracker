@@ -3,9 +3,12 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 /**
- * One-time migration for databases created before the PRESENT/ABSENT model.
- * Old schema allowed 'PRESENT' | 'LATE' | 'MANUAL' with a NOT NULL check_in_time.
- * Mapping: LATE -> ABSENT (arrived after window end), MANUAL -> PRESENT.
+ * One-time migration for databases created before the WFO/WFH/LEAVE model.
+ * Migrates old statuses:
+ * - 'PRESENT' -> 'WFO'
+ * - 'ABSENT' -> 'WFH'
+ * - 'LATE' -> 'WFH'
+ * - 'MANUAL' -> 'WFO'
  */
 function migrateLegacyAttendanceTable(db) {
   const row = db
@@ -13,14 +16,22 @@ function migrateLegacyAttendanceTable(db) {
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'attendance_log'"
     )
     .get();
-  if (!row || !String(row.sql).includes("'LATE'")) return;
+  if (!row) return;
+  const sql = String(row.sql);
+  if (
+    !sql.includes("'PRESENT'") &&
+    !sql.includes("'ABSENT'") &&
+    !sql.includes("'LATE'")
+  ) {
+    return;
+  }
 
   db.exec(`
     BEGIN;
     CREATE TABLE attendance_log_new (
       date TEXT PRIMARY KEY,
       check_in_time TEXT,
-      status TEXT NOT NULL CHECK(status IN ('PRESENT', 'ABSENT')),
+      status TEXT NOT NULL CHECK(status IN ('WFO', 'WFH', 'LEAVE')),
       trigger_type TEXT DEFAULT 'GEOFENCE',
       latitude REAL,
       longitude REAL,
@@ -32,7 +43,16 @@ function migrateLegacyAttendanceTable(db) {
     SELECT
       date,
       check_in_time,
-      CASE status WHEN 'LATE' THEN 'ABSENT' ELSE 'PRESENT' END,
+      CASE status
+        WHEN 'PRESENT' THEN 'WFO'
+        WHEN 'ABSENT' THEN 'WFH'
+        WHEN 'LATE' THEN 'WFH'
+        WHEN 'MANUAL' THEN 'WFO'
+        WHEN 'WFO' THEN 'WFO'
+        WHEN 'WFH' THEN 'WFH'
+        WHEN 'LEAVE' THEN 'LEAVE'
+        ELSE 'WFH'
+      END,
       trigger_type, latitude, longitude, notes
     FROM attendance_log;
     DROP TABLE attendance_log;
@@ -81,7 +101,7 @@ function createDatabase(dbPath) {
     CREATE TABLE IF NOT EXISTS attendance_log (
       date TEXT PRIMARY KEY,
       check_in_time TEXT,
-      status TEXT NOT NULL CHECK(status IN ('PRESENT', 'ABSENT')),
+      status TEXT NOT NULL CHECK(status IN ('WFO', 'WFH', 'LEAVE')),
       trigger_type TEXT DEFAULT 'GEOFENCE',
       latitude REAL,
       longitude REAL,
@@ -130,8 +150,8 @@ function createDatabase(dbPath) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  // Fills in an arrival on a day that was auto-marked ABSENT before the arrival reached the server
-  const updateAutoAbsentStmt = db.prepare(`
+  // Fills in an arrival on a day that was auto-marked WFH before the arrival reached the server
+  const updateAutoWfhStmt = db.prepare(`
     UPDATE attendance_log
     SET check_in_time = ?, status = ?, trigger_type = ?, latitude = ?, longitude = ?,
         notes = COALESCE(?, notes)
@@ -149,9 +169,9 @@ function createDatabase(dbPath) {
       notes = excluded.notes
   `);
 
-  const insertAutoAbsentStmt = db.prepare(`
+  const insertAutoWfhStmt = db.prepare(`
     INSERT OR IGNORE INTO attendance_log (date, check_in_time, status, trigger_type, notes)
-    VALUES (?, NULL, 'ABSENT', 'AUTO', 'Not at destination by window end')
+    VALUES (?, NULL, 'WFH', 'AUTO', 'Target window closed without workplace arrival')
   `);
 
   const deleteByDateStmt = db.prepare(`
@@ -296,7 +316,7 @@ function createDatabase(dbPath) {
     }
 
     if (existing.trigger_type === 'AUTO') {
-      updateAutoAbsentStmt.run(
+      updateAutoWfhStmt.run(
         checkInTime,
         status,
         triggerType,
@@ -312,7 +332,7 @@ function createDatabase(dbPath) {
   }
 
   /**
-   * Explicitly marks a day PRESENT or ABSENT from the calendar.
+   * Explicitly marks a day WFO, WFH, or LEAVE from the calendar.
    */
   function setDayStatus({ date, status, checkInTime = null, notes = null }) {
     upsertManualStmt.run(date, checkInTime, status, notes);
@@ -328,12 +348,17 @@ function createDatabase(dbPath) {
   }
 
   /**
-   * Marks a day ABSENT only if nothing is recorded for it yet.
-   * @returns {boolean} true if a new ABSENT record was created
+   * Auto-marks a day WFH only if nothing is recorded for it yet.
+   * Note: LEAVE is NEVER auto-selected. It can only be set manually.
+   * @returns {boolean} true if a new WFH record was created
    */
-  function markAbsentIfMissing(date) {
-    const result = insertAutoAbsentStmt.run(date);
+  function markWfhIfMissing(date) {
+    const result = insertAutoWfhStmt.run(date);
     return result.changes > 0;
+  }
+
+  function markAbsentIfMissing(date) {
+    return markWfhIfMissing(date);
   }
 
   function close() {
@@ -350,6 +375,7 @@ function createDatabase(dbPath) {
     recordCheckIn,
     setDayStatus,
     clearDay,
+    markWfhIfMissing,
     markAbsentIfMissing,
     close,
   };

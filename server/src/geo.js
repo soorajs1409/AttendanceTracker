@@ -83,18 +83,20 @@ function getLocalDateTime(timezone = 'Asia/Kolkata', now = new Date()) {
 }
 
 /**
- * A day has exactly two possible states: 'PRESENT' or 'ABSENT'.
- * The arrival time is only used to decide whether the destination was reached
- * by the end of the arrival window.
+ * A workday arrival has three valid states: 'WFO', 'WFH', or 'LEAVE'.
+ * When evaluating location arrival:
+ * Reached workplace on or before windowEnd -> 'WFO'.
+ * Reached after windowEnd (or window passed) -> 'WFH'.
+ * Note: 'LEAVE' can only be set manually by the user.
  *
  * @param {object} params
  * @param {string} params.shortTime - Arrival time 'HH:MM' in 24h format
  * @param {string} params.windowEnd - Window end 'HH:MM' in 24h format
- * @returns {'PRESENT' | 'ABSENT'}
+ * @returns {'WFO' | 'WFH'}
  */
 function evaluateAttendanceStatus({ shortTime, windowEnd }) {
   // Lexicographical comparison works directly on zero-padded 'HH:MM' 24-hour strings
-  return shortTime <= windowEnd ? 'PRESENT' : 'ABSENT';
+  return shortTime <= windowEnd ? 'WFO' : 'WFH';
 }
 
 module.exports = {

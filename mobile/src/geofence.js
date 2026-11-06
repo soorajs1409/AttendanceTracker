@@ -153,11 +153,11 @@ async function processGeofenceEnterEvent(
       await sendLocalNotification(
         {
           title:
-            result.status === 'PRESENT'
-              ? `Marked Present at ${placeName}`
-              : `Marked Absent at ${placeName}`,
+            result.status === 'WFO'
+              ? `Marked WFO at ${placeName}`
+              : `Marked WFH at ${placeName}`,
           body:
-            result.status === 'PRESENT'
+            result.status === 'WFO'
               ? `Checked in automatically at ${formatTime12h(result.time)}.`
               : `Arrived at ${formatTime12h(result.time)} after window closed.`,
         },
