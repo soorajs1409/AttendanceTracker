@@ -1,11 +1,13 @@
-name: Deploy Attendance Tracker
+name: Deploy & Build Attendance Tracker
 
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   deploy:
+    name: Deploy Server & Web (Self-Hosted)
     runs-on: self-hosted
     steps:
       - name: Check out latest code
@@ -36,3 +38,48 @@ jobs:
           cd /opt/attendance-tracker/server
           pm2 restart attendance-server || pm2 start src/index.js --name attendance-server
           pm2 save
+
+  build-apk:
+    name: Build Android APK (GitHub Runner)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out latest code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Mobile Dependencies
+        run: |
+          cd mobile
+          npm ci
+
+      - name: Generate Native Android Project
+        run: |
+          cd mobile
+          npx expo prebuild --platform android --clean
+
+      - name: Build Standalone Release APK
+        run: |
+          cd mobile/android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: attendance-tracker-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
