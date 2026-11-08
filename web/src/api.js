@@ -3,6 +3,37 @@ const STORAGE_API_KEY = 'attendance_api_key';
 const STORAGE_AUTH_USER_KEY = 'attendance_auth_user';
 const STORAGE_LOCAL_CRED_KEY = 'attendance_local_creds';
 const STORAGE_SETUP_DONE_KEY = 'attendance_setup_completed';
+const STORAGE_THEME_KEY = 'attendance_theme';
+
+export function getInitialTheme() {
+  try {
+    const saved = localStorage.getItem(STORAGE_THEME_KEY);
+    if (saved === 'dark' || saved === 'light') return saved;
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    ) {
+      return 'dark';
+    }
+  } catch {
+    // ignore
+  }
+  return 'light';
+}
+
+export function applyTheme(theme) {
+  const next = theme === 'dark' ? 'dark' : 'light';
+  try {
+    localStorage.setItem(STORAGE_THEME_KEY, next);
+  } catch {
+    // ignore
+  }
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('dark', next === 'dark');
+  }
+  return next;
+}
 
 export function getConnectionConfig() {
   return {
@@ -77,12 +108,14 @@ function saveLocalFallbackCreds({ username, password }) {
 
 async function apiRequest(path, options = {}) {
   const { serverUrl, apiKey } = getConnectionConfig();
-  const baseUrl = options.overrideServerUrl !== undefined
-    ? String(options.overrideServerUrl).trim().replace(/\/+$/, '')
-    : serverUrl;
-  const effectiveKey = options.overrideApiKey !== undefined
-    ? String(options.overrideApiKey).trim()
-    : apiKey;
+  const baseUrl =
+    options.overrideServerUrl !== undefined
+      ? String(options.overrideServerUrl).trim().replace(/\/+$/, '')
+      : serverUrl;
+  const effectiveKey =
+    options.overrideApiKey !== undefined
+      ? String(options.overrideApiKey).trim()
+      : apiKey;
 
   const headers = {
     ...(options.body ? { 'Content-Type': 'application/json' } : {}),
@@ -133,7 +166,6 @@ export async function loginUser({ username, password }) {
     if (err.status === 401) {
       throw new Error('Invalid username or password');
     }
-    // If server URL is not configured yet (before initial setup), verify against local/default credentials (sunil / test)
     const fallback = getLocalFallbackCreds();
     if (cleanUser === fallback.username && cleanPass === fallback.password) {
       const userObj = { username: cleanUser };
@@ -196,8 +228,64 @@ export function setDayAttendance(date, payload) {
   });
 }
 
+export function importAttendanceFile({ filename, contentBase64, csvText, mode = 'merge' }) {
+  return apiRequest('/api/import', {
+    method: 'POST',
+    body: {
+      filename,
+      mode,
+      ...(contentBase64 ? { content_base64: contentBase64 } : {}),
+      ...(csvText ? { csv_text: csvText } : {}),
+    },
+  });
+}
+
+export async function downloadAttendanceExcel({ month, year } = {}) {
+  const { serverUrl, apiKey } = getConnectionConfig();
+  const baseUrl = String(serverUrl || '').trim().replace(/\/+$/, '');
+  const params = new URLSearchParams();
+  if (month) params.set('month', month);
+  else if (year) params.set('year', year);
+
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${baseUrl}/api/export${query}`, {
+    method: 'GET',
+    headers: {
+      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    let msg = `Export failed with status ${response.status}`;
+    try {
+      const errData = await response.json();
+      if (errData?.error) msg = errData.error;
+    } catch {
+      // ignore non-json error
+    }
+    throw new Error(msg);
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition') || '';
+  const fnMatch = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = fnMatch
+    ? fnMatch[1]
+    : `Shift_Attendance_${month || year || 'all'}.xlsx`;
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  return filename;
+}
+
 /**
- * Formats 'HH:MM:SS' or 'HH:MM' into friendly 12-hour format (e.g. '09:14 AM').
+ * Formats 'HH:MM:SS' or 'HH:MM' into concise 24h HH:MM or 12h format.
  */
 export function formatTime12h(timeStr) {
   if (!timeStr) return '—';
@@ -209,6 +297,11 @@ export function formatTime12h(timeStr) {
   const period = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12 || 12;
   return `${String(hours).padStart(2, '0')}:${minutes} ${period}`;
+}
+
+export function formatTime24h(timeStr) {
+  if (!timeStr) return '—';
+  return String(timeStr).slice(0, 5);
 }
 
 /**

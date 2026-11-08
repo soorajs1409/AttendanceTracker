@@ -3,12 +3,9 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 /**
- * One-time migration for databases created before the WFO/WFH/LEAVE model.
- * Migrates old statuses:
- * - 'PRESENT' -> 'WFO'
- * - 'ABSENT' -> 'WFH'
- * - 'LATE' -> 'WFH'
- * - 'MANUAL' -> 'WFO'
+ * Migrates databases created with older attendance_log schemas:
+ * - Converts legacy statuses ('PRESENT' -> 'WFO', 'ABSENT'/'LATE' -> 'WFH', 'MANUAL' -> 'WFO')
+ * - Adds check_out_time, nsa, on_call, remarks columns and allows nullable status for weekend On-Call / CR logs.
  */
 function migrateLegacyAttendanceTable(db) {
   const row = db
@@ -19,7 +16,10 @@ function migrateLegacyAttendanceTable(db) {
   if (!row) return;
   const sql = String(row.sql);
   if (
-    sql.includes("'HOLIDAY'") &&
+    sql.includes('check_out_time') &&
+    sql.includes('on_call') &&
+    sql.includes('remarks') &&
+    sql.includes('status IS NULL') &&
     !sql.includes("'PRESENT'") &&
     !sql.includes("'ABSENT'") &&
     !sql.includes("'LATE'")
@@ -27,23 +27,36 @@ function migrateLegacyAttendanceTable(db) {
     return;
   }
 
+  const colInfo = db.prepare('PRAGMA table_info(attendance_log)').all();
+  const colNames = new Set(colInfo.map((c) => c.name));
+
+  const checkOutExpr = colNames.has('check_out_time') ? 'check_out_time' : 'NULL';
+  const nsaExpr = colNames.has('nsa') ? 'COALESCE(nsa, 0)' : '0';
+  const onCallExpr = colNames.has('on_call') ? 'COALESCE(on_call, 0)' : '0';
+  const remarksExpr = colNames.has('remarks') ? 'remarks' : 'NULL';
+
   db.exec(`
     BEGIN;
     CREATE TABLE attendance_log_new (
       date TEXT PRIMARY KEY,
       check_in_time TEXT,
-      status TEXT NOT NULL CHECK(status IN ('WFO', 'WFH', 'LEAVE', 'HOLIDAY')),
+      check_out_time TEXT,
+      status TEXT CHECK(status IS NULL OR status IN ('WFO', 'WFH', 'LEAVE', 'HOLIDAY')),
+      nsa INTEGER NOT NULL DEFAULT 0,
+      on_call INTEGER NOT NULL DEFAULT 0,
       trigger_type TEXT DEFAULT 'GEOFENCE',
       latitude REAL,
       longitude REAL,
-      notes TEXT
+      notes TEXT,
+      remarks TEXT
     );
     INSERT INTO attendance_log_new (
-      date, check_in_time, status, trigger_type, latitude, longitude, notes
+      date, check_in_time, check_out_time, status, nsa, on_call, trigger_type, latitude, longitude, notes, remarks
     )
     SELECT
       date,
       check_in_time,
+      ${checkOutExpr},
       CASE status
         WHEN 'PRESENT' THEN 'WFO'
         WHEN 'ABSENT' THEN 'WFH'
@@ -53,9 +66,15 @@ function migrateLegacyAttendanceTable(db) {
         WHEN 'WFH' THEN 'WFH'
         WHEN 'LEAVE' THEN 'LEAVE'
         WHEN 'HOLIDAY' THEN 'HOLIDAY'
-        ELSE 'WFH'
+        ELSE NULL
       END,
-      trigger_type, latitude, longitude, notes
+      ${nsaExpr},
+      ${onCallExpr},
+      trigger_type,
+      latitude,
+      longitude,
+      notes,
+      ${remarksExpr}
     FROM attendance_log;
     DROP TABLE attendance_log;
     ALTER TABLE attendance_log_new RENAME TO attendance_log;
@@ -64,8 +83,7 @@ function migrateLegacyAttendanceTable(db) {
 }
 
 /**
- * Initializes the SQLite database with the 2-table simplified schema
- * (`settings` and `attendance_log`) and provides data access methods.
+ * Initializes the SQLite database with settings, attendance_log, holidays_ref, and user_account tables.
  *
  * @param {string} [dbPath] - File path to SQLite DB or ':memory:' for tests
  */
@@ -103,11 +121,20 @@ function createDatabase(dbPath) {
     CREATE TABLE IF NOT EXISTS attendance_log (
       date TEXT PRIMARY KEY,
       check_in_time TEXT,
-      status TEXT NOT NULL CHECK(status IN ('WFO', 'WFH', 'LEAVE', 'HOLIDAY')),
+      check_out_time TEXT,
+      status TEXT CHECK(status IS NULL OR status IN ('WFO', 'WFH', 'LEAVE', 'HOLIDAY')),
+      nsa INTEGER NOT NULL DEFAULT 0,
+      on_call INTEGER NOT NULL DEFAULT 0,
       trigger_type TEXT DEFAULT 'GEOFENCE',
       latitude REAL,
       longitude REAL,
-      notes TEXT
+      notes TEXT,
+      remarks TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS holidays_ref (
+      date TEXT PRIMARY KEY,
+      name TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS user_account (
@@ -132,6 +159,11 @@ function createDatabase(dbPath) {
 
   migrateLegacyAttendanceTable(db);
 
+  const SELECT_COLS = `
+    date, check_in_time, check_out_time, status, nsa, on_call,
+    trigger_type, latitude, longitude, notes, remarks
+  `;
+
   const getSettingsStmt = db.prepare(`
     SELECT id, work_name, work_latitude, work_longitude, radius_meters,
            window_start, window_end, work_days, updated_at
@@ -154,23 +186,49 @@ function createDatabase(dbPath) {
   `);
 
   const getByDateStmt = db.prepare(`
-    SELECT date, check_in_time, status, trigger_type, latitude, longitude, notes
+    SELECT ${SELECT_COLS}
     FROM attendance_log
     WHERE date = ?
   `);
 
   const getRecentStmt = db.prepare(`
-    SELECT date, check_in_time, status, trigger_type, latitude, longitude, notes
+    SELECT ${SELECT_COLS}
     FROM attendance_log
     ORDER BY date DESC
     LIMIT ?
   `);
 
   const getMonthlyStmt = db.prepare(`
-    SELECT date, check_in_time, status, trigger_type, latitude, longitude, notes
+    SELECT ${SELECT_COLS}
     FROM attendance_log
     WHERE date LIKE ?
     ORDER BY date ASC
+  `);
+
+  const getAllStmt = db.prepare(`
+    SELECT ${SELECT_COLS}
+    FROM attendance_log
+    ORDER BY date ASC
+  `);
+
+  const getAvailableMonthsStmt = db.prepare(`
+    SELECT DISTINCT substr(date, 1, 7) AS month
+    FROM attendance_log
+    WHERE length(date) >= 7
+    ORDER BY month ASC
+  `);
+
+  const getHolidaysRefStmt = db.prepare(`
+    SELECT date, name
+    FROM holidays_ref
+    ORDER BY date ASC
+  `);
+
+  const upsertHolidayRefStmt = db.prepare(`
+    INSERT INTO holidays_ref (date, name)
+    VALUES (?, ?)
+    ON CONFLICT(date) DO UPDATE SET
+      name = excluded.name
   `);
 
   const insertCheckInStmt = db.prepare(`
@@ -187,15 +245,37 @@ function createDatabase(dbPath) {
     WHERE date = ? AND trigger_type = 'AUTO'
   `);
 
-  // Explicit user choice from the calendar; keeps any previously logged arrival time
+  // Explicit user choice from the calendar or table editor
   const upsertManualStmt = db.prepare(`
-    INSERT INTO attendance_log (date, check_in_time, status, trigger_type, notes)
-    VALUES (?, ?, ?, 'MANUAL', ?)
+    INSERT INTO attendance_log (
+      date, check_in_time, check_out_time, status, nsa, on_call, trigger_type, notes, remarks
+    )
+    VALUES (?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?)
     ON CONFLICT(date) DO UPDATE SET
-      check_in_time = COALESCE(excluded.check_in_time, attendance_log.check_in_time),
+      check_in_time = ?,
+      check_out_time = ?,
       status = excluded.status,
+      nsa = excluded.nsa,
+      on_call = excluded.on_call,
       trigger_type = 'MANUAL',
-      notes = excluded.notes
+      notes = excluded.notes,
+      remarks = excluded.remarks
+  `);
+
+  const upsertImportStmt = db.prepare(`
+    INSERT INTO attendance_log (
+      date, check_in_time, check_out_time, status, nsa, on_call, trigger_type, notes, remarks
+    )
+    VALUES (?, ?, ?, ?, ?, ?, 'IMPORT', ?, ?)
+    ON CONFLICT(date) DO UPDATE SET
+      check_in_time = excluded.check_in_time,
+      check_out_time = excluded.check_out_time,
+      status = excluded.status,
+      nsa = excluded.nsa,
+      on_call = excluded.on_call,
+      trigger_type = 'IMPORT',
+      notes = excluded.notes,
+      remarks = excluded.remarks
   `);
 
   const insertAutoWfhStmt = db.prepare(`
@@ -347,11 +427,26 @@ function createDatabase(dbPath) {
     return getMonthlyStmt.all(`${month}-%`);
   }
 
+  function getAllAttendance(prefix = null) {
+    if (prefix) {
+      return getMonthlyStmt.all(`${prefix}%`);
+    }
+    return getAllStmt.all();
+  }
+
+  function getAvailableMonths() {
+    return getAvailableMonthsStmt.all().map((r) => r.month);
+  }
+
+  function getHolidaysRef() {
+    return getHolidaysRefStmt.all();
+  }
+
   /**
    * Logs an arrival (geofence entry or manual check-in). Idempotent per calendar day:
    * - No record yet            -> insert with the computed status.
-   * - Auto-marked ABSENT       -> fill in the arrival (e.g. an offline-queued arrival that
-   *                               happened inside the window is upgraded to PRESENT).
+   * - Auto-marked WFH          -> fill in the arrival (e.g. an offline-queued arrival that
+   *                               happened inside the window is upgraded to WFO).
    * - Any other existing record -> left untouched (first arrival / explicit user choice wins).
    */
   function recordCheckIn({
@@ -395,11 +490,95 @@ function createDatabase(dbPath) {
   }
 
   /**
-   * Explicitly marks a day WFO, WFH, or LEAVE from the calendar.
+   * Explicitly marks or updates a day (status, login/logout times, NSA, On Call, notes, remarks).
    */
-  function setDayStatus({ date, status, checkInTime = null, notes = null }) {
-    upsertManualStmt.run(date, checkInTime, status, notes);
+  function setDayStatus({
+    date,
+    status,
+    checkInTime = undefined,
+    checkOutTime = undefined,
+    nsa = undefined,
+    onCall = undefined,
+    notes = undefined,
+    remarks = undefined,
+  }) {
+    const existing = getAttendanceByDate(date);
+
+    const nextCheckIn =
+      checkInTime !== undefined
+        ? checkInTime
+        : existing?.check_in_time ?? null;
+    const nextCheckOut =
+      checkOutTime !== undefined
+        ? checkOutTime
+        : existing?.check_out_time ?? null;
+    const nextNsa =
+      nsa !== undefined ? (nsa ? 1 : 0) : existing?.nsa ?? 0;
+    const nextOnCall =
+      onCall !== undefined ? (onCall ? 1 : 0) : existing?.on_call ?? 0;
+    const nextNotes =
+      notes !== undefined ? notes : existing?.notes ?? null;
+    const nextRemarks =
+      remarks !== undefined ? remarks : existing?.remarks ?? null;
+
+    upsertManualStmt.run(
+      date,
+      nextCheckIn,
+      nextCheckOut,
+      status,
+      nextNsa,
+      nextOnCall,
+      nextNotes,
+      nextRemarks,
+      nextCheckIn,
+      nextCheckOut
+    );
     return getAttendanceByDate(date);
+  }
+
+  /**
+   * Bulk imports scraped spreadsheet records and holiday references inside a single transaction.
+   */
+  function importSpreadsheetData({
+    records = [],
+    holidays = [],
+    replaceAll = false,
+  }) {
+    db.exec('BEGIN');
+    try {
+      if (replaceAll) {
+        db.exec('DELETE FROM attendance_log; DELETE FROM holidays_ref;');
+      }
+
+      for (const h of holidays) {
+        if (h.date && h.name) {
+          upsertHolidayRefStmt.run(h.date, h.name);
+        }
+      }
+
+      for (const rec of records) {
+        upsertImportStmt.run(
+          rec.date,
+          rec.check_in_time || null,
+          rec.check_out_time || null,
+          rec.status || null,
+          rec.nsa ? 1 : 0,
+          rec.on_call ? 1 : 0,
+          rec.notes || null,
+          rec.remarks || null
+        );
+      }
+
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+
+    return {
+      imported_records: records.length,
+      imported_holidays: holidays.length,
+    };
   }
 
   /**
@@ -438,8 +617,12 @@ function createDatabase(dbPath) {
     getAttendanceByDate,
     getRecentAttendance,
     getMonthlyAttendance,
+    getAllAttendance,
+    getAvailableMonths,
+    getHolidaysRef,
     recordCheckIn,
     setDayStatus,
+    importSpreadsheetData,
     clearDay,
     markWfhIfMissing,
     markAbsentIfMissing,

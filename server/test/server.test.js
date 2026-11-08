@@ -415,3 +415,138 @@ describe('Attendance Tracker — User Authentication & Profile', () => {
     }
   });
 });
+
+describe('Attendance Tracker — Spreadsheet Import (.xlsx / .csv) & Excel Export', () => {
+  it('dynamically scrapes Holiday Reference, Monthly Off-Dates, WFO/WFH/LEAVE/PH, Login/Logout, NSA, On Call, CR notes, and exports/re-imports .xlsx', async () => {
+    const store = createDatabase(':memory:');
+    const app = createApp({ store, apiKey: 'sheet_key_123' });
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-API-Key': 'sheet_key_123',
+    };
+
+    const sampleCsv = [
+      '2024-01-01,21',
+      ',,,Holidays,January,October,November',
+      'Date,Name,,2024-11-01,2026-01-03,2026-10-02,2026-11-01',
+      '2024-01-15,Makara Sankranti,,2024-11-02,2026-01-15,2026-10-20,2026-11-10',
+      '2024-01-26,Republic Day,,,2026-01-26,,',
+      '2024-10-02,Gandhi Jayanti,,,,,',
+      '',
+      ',Date,Day,Login,Logout,Description,,NSA,ON Call,,,,January,,,,No of Working Days,,,2026-01-01,20',
+      ',2026-01-01,Thu,12:00:00,22:00:00,WFH,,Yes,Yes,rcvd,,WFO (RGA),15,75',
+      ',2026-01-02,Fri,12:00:00,22:00:00,WFO,,Yes,,,,WFH(Remote),5,25',
+      ',2026-01-03,Sat,,,,,,Yes,rcvd,,Public Holiday,1,5',
+      ',2026-01-15,Thu,,,,,,,,,,Leave,0,0',
+      ',2026-01-26,Mon,,,PH,,,,,',
+      '',
+      ',Date,Day,Login,Logout,Description,,NSA,ON Call,,,,October,,,,No of Working Days,,,2026-01-01,17',
+      ',2026-10-02,Fri,,,PH,,,,,',
+      ',2026-10-05,Mon,,,Leave,,,,,',
+      ',2026-10-10,Sat,,,CR implementation - CHG0095532,,,Yes',
+      ',2026-10-20,Tue,,,PH - Worked on CSA policy creation,,,Yes',
+      '',
+      ',Date,Day,Login,Logout,Description,,NSA,ON Call,,,,November,,,,No of Working Days,,,,20',
+      ',2026-11-01,Sun,,,CR- Spring Park LB Upgrade,,,Yes',
+      ',2026-11-06,Fri,Thu,12:00:00,WFO,,Yes,',
+      ',2026-11-10,Tue,,,,,,,,,',
+    ].join('\n');
+
+    try {
+      // 1. Import via CSV text
+      const importRes = await app.inject({
+        method: 'POST',
+        url: '/api/import',
+        headers,
+        body: {
+          filename: 'Shift_2026.csv',
+          csv_text: sampleCsv,
+          mode: 'replace',
+        },
+      });
+      assert.equal(importRes.status, 200);
+      const importData = await importRes.json();
+      assert.equal(importData.success, true);
+      assert.equal(importData.imported_holidays, 3);
+      assert.deepEqual(importData.months, ['2026-01', '2026-10', '2026-11']);
+
+      // 2. Verify January history: 2026-01-15 auto-detected as HOLIDAY ('Makara Sankranti') from top reference grid
+      const janRes = await app.inject({
+        method: 'GET',
+        url: '/api/history?month=2026-01',
+        headers: { 'X-API-Key': 'sheet_key_123' },
+      });
+      assert.equal(janRes.status, 200);
+      const janData = await janRes.json();
+      assert.equal(janData.summary.wfo, 1);
+      assert.equal(janData.summary.wfh, 1);
+      assert.equal(janData.summary.holiday, 2); // 2026-01-15 + 2026-01-26
+      assert.equal(janData.summary.nsa_count, 2);
+      assert.equal(janData.summary.on_call_count, 2);
+      assert.equal(janData.summary.total_working_days, 20); // 22 weekdays - 2 holidays = 20
+
+      const jan15 = store.getAttendanceByDate('2026-01-15');
+      assert.equal(jan15.status, 'HOLIDAY');
+      assert.equal(jan15.notes, 'Makara Sankranti');
+
+      const jan01 = store.getAttendanceByDate('2026-01-01');
+      assert.equal(jan01.check_in_time, '12:00:00');
+      assert.equal(jan01.check_out_time, '22:00:00');
+      assert.equal(jan01.nsa, 1);
+      assert.equal(jan01.on_call, 1);
+      assert.equal(jan01.remarks, 'rcvd');
+
+      // 3. Verify October special cases: weekend CR on-call & 'PH - Worked on CSA policy creation'
+      const oct10 = store.getAttendanceByDate('2026-10-10');
+      assert.equal(oct10.status, null);
+      assert.equal(oct10.on_call, 1);
+      assert.equal(oct10.notes, 'CR implementation - CHG0095532');
+
+      const oct20 = store.getAttendanceByDate('2026-10-20');
+      assert.equal(oct20.status, 'HOLIDAY');
+      assert.equal(oct20.on_call, 1);
+      assert.equal(oct20.notes, 'Worked on CSA policy creation');
+
+      // 4. Verify November shifted login typo recovery (2026-11-06)
+      const nov06 = store.getAttendanceByDate('2026-11-06');
+      assert.equal(nov06.status, 'WFO');
+      assert.equal(nov06.check_in_time, '12:00:00');
+      assert.equal(nov06.nsa, 1);
+
+      // 5. Export to .xlsx binary workbook and re-import into a fresh database
+      const exportRes = await app.inject({
+        method: 'GET',
+        url: '/api/export',
+        headers: { 'X-API-Key': 'sheet_key_123' },
+      });
+      assert.equal(exportRes.status, 200);
+      assert.ok(
+        (exportRes.headers['Content-Type'] || exportRes.headers['content-type']).includes(
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+      );
+      const xlsxBuf = await exportRes.buffer();
+      assert.ok(xlsxBuf.length > 500);
+      // Verify PKZIP magic bytes
+      assert.equal(xlsxBuf[0], 0x50);
+      assert.equal(xlsxBuf[1], 0x4b);
+
+      const roundTripRes = await app.inject({
+        method: 'POST',
+        url: '/api/import',
+        headers,
+        body: {
+          filename: 'Exported.xlsx',
+          content_base64: xlsxBuf.toString('base64'),
+          mode: 'replace',
+        },
+      });
+      assert.equal(roundTripRes.status, 200);
+      const rtData = await roundTripRes.json();
+      assert.equal(rtData.imported_records, importData.imported_records);
+      assert.equal(rtData.imported_holidays, importData.imported_holidays);
+    } finally {
+      store.close();
+    }
+  });
+});

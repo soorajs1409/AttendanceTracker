@@ -9,6 +9,10 @@ const {
   getLocalDateTime,
   evaluateAttendanceStatus,
 } = require('./geo');
+const {
+  parseAndScrapeSpreadsheet,
+  generateAttendanceWorkbook,
+} = require('./spreadsheet');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -19,10 +23,13 @@ const MIME_TYPES = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.apk': 'application/vnd.android.package-archive',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.csv': 'text/csv; charset=utf-8',
 };
 
-const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 const MONTH_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
+const YEAR_REGEX = /^\d{4}$/;
 const DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 /**
@@ -51,14 +58,14 @@ function sendJson(res, statusCode, payload) {
 }
 
 /**
- * Parses JSON request body with a 64KB size limit.
+ * Parses JSON request body with a 15MB size limit (supports base64 spreadsheet uploads).
  */
-function parseJsonBody(req) {
+function parseJsonBody(req, maxBytes = 15 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 65536) {
+      if (raw.length > maxBytes) {
         reject(new Error('Payload too large'));
         req.destroy();
       }
@@ -76,6 +83,16 @@ function parseJsonBody(req) {
     });
     req.on('error', reject);
   });
+}
+
+function normalizeTimeParam(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || String(raw).trim() === '') return null;
+  const s = String(raw).trim();
+  if (!TIME_REGEX.test(s)) {
+    return false;
+  }
+  return s.length === 5 ? `${s}:00` : s;
 }
 
 /**
@@ -205,7 +222,9 @@ function createApp({
           req.headers['x-api-key'] ||
           (req.headers.authorization?.startsWith('Bearer ')
             ? req.headers.authorization.slice(7).trim()
-            : '');
+            : '') ||
+          parsedUrl.searchParams.get('api_key') ||
+          '';
 
         if (!safeCompare(String(headerKey || ''), apiKey)) {
           sendJson(res, 401, {
@@ -233,12 +252,17 @@ function createApp({
             status: todayRecord ? todayRecord.status : null,
             checked_in: Boolean(todayRecord && todayRecord.check_in_time),
             check_in_time: todayRecord ? todayRecord.check_in_time : null,
+            check_out_time: todayRecord ? todayRecord.check_out_time : null,
+            nsa: todayRecord ? Boolean(todayRecord.nsa) : false,
+            on_call: todayRecord ? Boolean(todayRecord.on_call) : false,
             trigger_type: todayRecord ? todayRecord.trigger_type : null,
             notes: todayRecord ? todayRecord.notes : null,
+            remarks: todayRecord ? todayRecord.remarks : null,
           },
           settings,
           user: store.getUser(),
           recent,
+          available_months: store.getAvailableMonths(),
         });
         return;
       }
@@ -394,6 +418,8 @@ function createApp({
         const wfh = records.filter((r) => r.status === 'WFH').length;
         const leave = records.filter((r) => r.status === 'LEAVE').length;
         const holiday = records.filter((r) => r.status === 'HOLIDAY').length;
+        const nsaCount = records.filter((r) => Boolean(r.nsa)).length;
+        const onCallCount = records.filter((r) => Boolean(r.on_call)).length;
         const total = wfo + wfh + leave + holiday;
 
         // Calculate calendar days, weekend days (Sat/Sun), and total working days
@@ -430,12 +456,20 @@ function createApp({
           wfh,
           leave,
           holiday,
-          // WFO and WFH percentages calculated based on total working days
+          nsa_count: nsaCount,
+          on_call_count: onCallCount,
+          // Percentages calculated based on total working days
           wfo_percent: totalWorkingDays
             ? Math.round((wfo / totalWorkingDays) * 1000) / 10
             : 0,
           wfh_percent: totalWorkingDays
             ? Math.round((wfh / totalWorkingDays) * 1000) / 10
+            : 0,
+          leave_percent: totalWorkingDays
+            ? Math.round((leave / totalWorkingDays) * 1000) / 10
+            : 0,
+          holiday_percent: totalWorkingDays
+            ? Math.round((holiday / totalWorkingDays) * 1000) / 10
             : 0,
         };
 
@@ -443,11 +477,13 @@ function createApp({
           month: requestedMonth,
           summary,
           records,
+          available_months: store.getAvailableMonths(),
+          holidays_ref: store.getHolidaysRef(),
         });
         return;
       }
 
-      // 4. PUT /api/attendance/YYYY-MM-DD — manually mark a day WFO / WFH / LEAVE / HOLIDAY, or clear it
+      // 4. PUT /api/attendance/YYYY-MM-DD — manually mark or update a day, or clear it
       const dayMatch = pathname.match(/^\/api\/attendance\/(\d{4}-\d{2}-\d{2})$/);
       if (req.method === 'PUT' && dayMatch) {
         const date = dayMatch[1];
@@ -464,46 +500,203 @@ function createApp({
           return;
         }
 
-        if (body.status === null) {
+        const hasExtraFields =
+          Boolean(body.nsa) ||
+          Boolean(body.on_call) ||
+          Boolean(body.notes && String(body.notes).trim()) ||
+          Boolean(body.remarks && String(body.remarks).trim());
+
+        if (body.status === null && !hasExtraFields) {
           store.clearDay(date);
           sendJson(res, 200, { success: true, date, record: null });
           return;
         }
 
-        const rawStatus = String(body.status || '').trim().toUpperCase();
-        const status =
-          rawStatus === 'PUBLIC HOLIDAY' || rawStatus === 'PUBLIC_HOLIDAY'
-            ? 'HOLIDAY'
-            : rawStatus;
+        let status = null;
+        if (body.status !== null && body.status !== undefined && String(body.status).trim() !== '') {
+          const rawStatus = String(body.status).trim().toUpperCase();
+          status =
+            rawStatus === 'PUBLIC HOLIDAY' ||
+            rawStatus === 'PUBLIC_HOLIDAY' ||
+            rawStatus === 'PH'
+              ? 'HOLIDAY'
+              : rawStatus;
 
-        if (!['WFO', 'WFH', 'LEAVE', 'HOLIDAY'].includes(status)) {
+          if (!['WFO', 'WFH', 'LEAVE', 'HOLIDAY'].includes(status)) {
+            sendJson(res, 400, {
+              error:
+                "status must be 'WFO', 'WFH', 'LEAVE', 'HOLIDAY', or null to clear the day",
+            });
+            return;
+          }
+        }
+
+        const rawIn = body.time !== undefined ? body.time : body.check_in_time;
+        const checkInTime = normalizeTimeParam(rawIn);
+        if (checkInTime === false) {
+          sendJson(res, 400, { error: 'time must be in HH:MM or HH:MM:SS (24-hour) format' });
+          return;
+        }
+
+        const rawOut =
+          body.check_out_time !== undefined ? body.check_out_time : body.logout_time;
+        const checkOutTime = normalizeTimeParam(rawOut);
+        if (checkOutTime === false) {
           sendJson(res, 400, {
-            error:
-              "status must be 'WFO', 'WFH', 'LEAVE', 'HOLIDAY', or null to clear the day",
+            error: 'check_out_time must be in HH:MM or HH:MM:SS (24-hour) format',
           });
           return;
         }
 
-        let checkInTime = null;
-        if (body.time) {
-          if (!TIME_REGEX.test(String(body.time))) {
-            sendJson(res, 400, { error: 'time must be in HH:MM (24-hour) format' });
-            return;
-          }
-          checkInTime = `${body.time}:00`;
-        }
-
         const notes =
-          typeof body.notes === 'string' && body.notes.trim()
-            ? body.notes.trim()
-            : null;
+          body.notes !== undefined
+            ? typeof body.notes === 'string' && body.notes.trim()
+              ? body.notes.trim()
+              : null
+            : undefined;
 
-        const record = store.setDayStatus({ date, status, checkInTime, notes });
+        const remarks =
+          body.remarks !== undefined
+            ? typeof body.remarks === 'string' && body.remarks.trim()
+              ? body.remarks.trim()
+              : null
+            : undefined;
+
+        const record = store.setDayStatus({
+          date,
+          status,
+          checkInTime,
+          checkOutTime,
+          nsa: body.nsa,
+          onCall: body.on_call,
+          notes,
+          remarks,
+        });
         sendJson(res, 200, { success: true, date, record });
         return;
       }
 
-      // 5. POST /api/settings (or PUT /api/settings)
+      // 5. POST /api/import — dynamically scrape & import an uploaded .xlsx or .csv spreadsheet
+      if (req.method === 'POST' && pathname === '/api/import') {
+        let body;
+        try {
+          body = await parseJsonBody(req);
+        } catch (err) {
+          sendJson(res, 400, { error: err.message });
+          return;
+        }
+
+        let inputBuffer = null;
+        if (body.content_base64 && typeof body.content_base64 === 'string') {
+          const cleanB64 = body.content_base64.replace(/^data:[^;]+;base64,/, '');
+          inputBuffer = Buffer.from(cleanB64, 'base64');
+        } else if (body.csv_text && typeof body.csv_text === 'string') {
+          inputBuffer = Buffer.from(body.csv_text, 'utf8');
+        } else {
+          sendJson(res, 400, {
+            error: 'Request must include content_base64 (.xlsx/.csv) or csv_text',
+          });
+          return;
+        }
+
+        let scraped;
+        try {
+          scraped = parseAndScrapeSpreadsheet(inputBuffer);
+        } catch (err) {
+          sendJson(res, 400, {
+            error: `Failed to parse spreadsheet: ${err.message}`,
+          });
+          return;
+        }
+
+        if (scraped.records.length === 0 && scraped.holidays.length === 0) {
+          sendJson(res, 400, {
+            error:
+              'No valid attendance records or holiday dates were found in the uploaded file.',
+          });
+          return;
+        }
+
+        const replaceAll = String(body.mode || 'merge').toLowerCase() === 'replace';
+        store.importSpreadsheetData({
+          records: scraped.records,
+          holidays: scraped.holidays,
+          replaceAll,
+        });
+
+        sendJson(res, 200, {
+          success: true,
+          filename: body.filename || 'spreadsheet',
+          mode: replaceAll ? 'replace' : 'merge',
+          imported_records: scraped.records.length,
+          imported_holidays: scraped.holidays.length,
+          months: scraped.months,
+          latest_month:
+            scraped.months.length > 0
+              ? scraped.months[scraped.months.length - 1]
+              : null,
+          available_months: store.getAvailableMonths(),
+        });
+        return;
+      }
+
+      // 6. GET /api/export — generates & downloads a detailed multi-sheet .xlsx Excel workbook
+      if (req.method === 'GET' && pathname === '/api/export') {
+        const monthParam = parsedUrl.searchParams.get('month');
+        const yearParam = parsedUrl.searchParams.get('year');
+
+        let records = [];
+        let months = [];
+        let fileSuffix = 'all';
+
+        if (monthParam) {
+          if (!MONTH_REGEX.test(monthParam)) {
+            sendJson(res, 400, { error: 'Invalid month format. Expected YYYY-MM' });
+            return;
+          }
+          records = store.getMonthlyAttendance(monthParam);
+          months = [monthParam];
+          fileSuffix = monthParam;
+        } else if (yearParam) {
+          if (!YEAR_REGEX.test(yearParam)) {
+            sendJson(res, 400, { error: 'Invalid year format. Expected YYYY' });
+            return;
+          }
+          records = store.getAllAttendance(`${yearParam}-`);
+          months = store
+            .getAvailableMonths()
+            .filter((m) => m.startsWith(`${yearParam}-`));
+          fileSuffix = yearParam;
+        } else {
+          records = store.getAllAttendance();
+          months = store.getAvailableMonths();
+        }
+
+        if (months.length === 0) {
+          const localNow = getLocalDateTime(timezone, clock());
+          months = [localNow.date.slice(0, 7)];
+        }
+
+        const holidays = store.getHolidaysRef();
+        const xlsxBuffer = generateAttendanceWorkbook({
+          records,
+          holidays,
+          months,
+        });
+
+        res.writeHead(200, {
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="Shift_Attendance_${fileSuffix}.xlsx"`,
+          'Content-Length': String(xlsxBuffer.length),
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Expose-Headers': 'Content-Disposition',
+        });
+        res.end(xlsxBuffer);
+        return;
+      }
+
+      // 7. POST /api/settings (or PUT /api/settings)
       if (
         (req.method === 'POST' || req.method === 'PUT') &&
         pathname === '/api/settings'
@@ -630,10 +823,12 @@ function createApp({
           if (chunk) {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
           }
-          const rawBody = Buffer.concat(chunks).toString('utf8');
+          const rawBuffer = Buffer.concat(chunks);
+          const rawBody = rawBuffer.toString('utf8');
           resolve({
             status: statusCode,
             headers: resHeaders,
+            buffer: async () => rawBuffer,
             text: async () => rawBody,
             json: async () => (rawBody ? JSON.parse(rawBody) : null),
           });

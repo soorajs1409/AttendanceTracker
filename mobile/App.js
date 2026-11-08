@@ -28,14 +28,16 @@ const {
   resetOnboarding,
   getAuthUser,
   logoutUser,
+  getTheme,
+  saveTheme,
 } = require('./src/api');
 const { getGeofenceStatus } = require('./src/geofence');
 
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', code: 'DB' },
-  { id: 'history', label: 'Calendar', code: 'CL' },
-  { id: 'settings', label: 'Settings', code: 'ST' },
-  { id: 'profile', label: 'Profile', code: 'PR' },
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'history', label: 'Calendar' },
+  { id: 'settings', label: 'Settings' },
+  { id: 'profile', label: 'Profile' },
 ];
 
 function MainShell() {
@@ -46,11 +48,20 @@ function MainShell() {
   const [loading, setLoading] = useState(true);
   const [connError, setConnError] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
+  const [theme, setTheme] = useState('light');
   const [geofenceState, setGeofenceState] = useState({
     active: false,
     foregroundGranted: false,
     backgroundGranted: false,
   });
+
+  const isDark = theme === 'dark';
+
+  const handleToggleTheme = useCallback(async () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    await saveTheme(next);
+  }, [theme]);
 
   const refreshGeofenceState = useCallback(async () => {
     const st = await getGeofenceStatus();
@@ -76,11 +87,12 @@ function MainShell() {
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([getAuthUser(), isOnboardingCompleted()]).then(
-      ([user, completed]) => {
+    Promise.all([getAuthUser(), isOnboardingCompleted(), getTheme()]).then(
+      ([user, completed, savedTheme]) => {
         if (!mounted) return;
         setAuthUserState(user);
         setIsOnboarded(completed);
+        setTheme(savedTheme || 'light');
         if (user && completed) {
           loadAll();
         } else {
@@ -107,21 +119,31 @@ function MainShell() {
     };
   }, [loadAll]);
 
-  // While checking initial auth & onboarding state
   if (authUser === undefined || isOnboarded === null) {
     return (
-      <SafeAreaView style={[styles.safeArea, styles.loadingCenter]}>
-        <StatusBar style="dark" />
-        <ActivityIndicator size="large" color="#0f172a" />
+      <SafeAreaView
+        style={[
+          styles.safeArea,
+          isDark && styles.safeAreaDark,
+          styles.loadingCenter,
+        ]}
+      >
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <ActivityIndicator
+          size="large"
+          color={isDark ? '#f4f4f5' : '#18181b'}
+        />
       </SafeAreaView>
     );
   }
 
-  // 1. Not Logged In -> Display Minimal Login Screen
   if (!authUser) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <StatusBar style="dark" />
+      <SafeAreaView
+        style={[styles.safeArea, isDark && styles.safeAreaDark]}
+        edges={['top', 'left', 'right']}
+      >
+        <StatusBar style={isDark ? 'light' : 'dark'} />
         <LoginScreen
           onLoginSuccess={async ({ user, settings }) => {
             setAuthUserState(user);
@@ -139,11 +161,13 @@ function MainShell() {
     );
   }
 
-  // 2. Post-Login Initial Setup Prompt (Server URL, API Key, Lat & Long)
   if (!isOnboarded) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <StatusBar style="dark" />
+      <SafeAreaView
+        style={[styles.safeArea, isDark && styles.safeAreaDark]}
+        edges={['top', 'left', 'right']}
+      >
+        <StatusBar style={isDark ? 'light' : 'dark'} />
         <OnboardingScreen
           onComplete={async () => {
             setIsOnboarded(true);
@@ -154,50 +178,67 @@ function MainShell() {
     );
   }
 
-  // 3. Main Synced 4-Tab Application
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <StatusBar style="dark" />
+    <SafeAreaView
+      style={[styles.safeArea, isDark && styles.safeAreaDark]}
+      edges={['top', 'left', 'right']}
+    >
+      <StatusBar style={isDark ? 'light' : 'dark'} />
 
       {/* Top App Bar */}
-      <View style={styles.header}>
+      <View style={[styles.header, isDark && styles.headerDark]}>
         <View style={styles.brandRow}>
-          <View style={styles.logoBadge}>
-            <Text style={styles.logoText}>AT</Text>
+          <View style={[styles.logoBadge, isDark && styles.logoBadgeDark]}>
+            <Text style={[styles.logoText, isDark && styles.logoTextDark]}>
+              AT
+            </Text>
           </View>
           <View>
-            <Text style={styles.headerTitle}>Attendance</Text>
-            <Text style={styles.headerSub}>
+            <Text style={[styles.headerTitle, isDark && styles.headerTitleDark]}>
+              Attendance
+            </Text>
+            <Text style={[styles.headerSub, isDark && styles.headerSubDark]}>
               {statusData?.user?.username || authUser.username}
             </Text>
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[
-            styles.syncPill,
-            connError ? styles.syncPillOffline : styles.syncPillOnline,
-          ]}
-          onPress={() => {
-            if (connError) setActiveTab('settings');
-            else loadAll();
-          }}
-        >
-          <View
-            style={[
-              styles.syncDot,
-              { backgroundColor: connError ? '#e11d48' : '#059669' },
-            ]}
-          />
-          <Text
-            style={[
-              styles.syncText,
-              { color: connError ? '#9f1239' : '#065f46' },
-            ]}
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={[styles.themeBtn, isDark && styles.themeBtnDark]}
+            onPress={handleToggleTheme}
           >
-            {connError ? 'Offline' : 'Synced'}
-          </Text>
-        </TouchableOpacity>
+            <Text style={[styles.themeBtnText, isDark && styles.themeBtnTextDark]}>
+              {isDark ? 'Light' : 'Dark'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.syncPill,
+              connError ? styles.syncPillOffline : styles.syncPillOnline,
+            ]}
+            onPress={() => {
+              if (connError) setActiveTab('settings');
+              else loadAll();
+            }}
+          >
+            <View
+              style={[
+                styles.syncDot,
+                { backgroundColor: connError ? '#e11d48' : '#059669' },
+              ]}
+            />
+            <Text
+              style={[
+                styles.syncText,
+                { color: connError ? '#9f1239' : '#065f46' },
+              ]}
+            >
+              {connError ? 'Offline' : 'Synced'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Disconnected Callout Banner */}
@@ -221,7 +262,7 @@ function MainShell() {
       ) : null}
 
       {/* Active Screen Body */}
-      <View style={styles.body}>
+      <View style={[styles.body, isDark && styles.bodyDark]}>
         {activeTab === 'dashboard' && (
           <DashboardScreen
             statusData={statusData}
@@ -230,6 +271,7 @@ function MainShell() {
             pendingCount={pendingCount}
             onRefresh={loadAll}
             onNavigateSettings={() => setActiveTab('settings')}
+            theme={theme}
           />
         )}
 
@@ -237,6 +279,7 @@ function MainShell() {
           <HistoryScreen
             statusData={statusData}
             onRefreshStatus={loadAll}
+            theme={theme}
           />
         )}
 
@@ -271,7 +314,10 @@ function MainShell() {
       </View>
 
       {/* Bottom Tab Navigation Bar */}
-      <SafeAreaView edges={['bottom']} style={styles.bottomBarSafe}>
+      <SafeAreaView
+        edges={['bottom']}
+        style={[styles.bottomBarSafe, isDark && styles.bottomBarSafeDark]}
+      >
         <View style={styles.bottomBar}>
           {TABS.map((tab) => {
             const active = activeTab === tab.id;
@@ -284,13 +330,20 @@ function MainShell() {
                 <View
                   style={[
                     styles.tabIndicator,
-                    active && styles.tabIndicatorActive,
+                    active &&
+                      (isDark
+                        ? styles.tabIndicatorActiveDark
+                        : styles.tabIndicatorActive),
                   ]}
                 />
                 <Text
                   style={[
                     styles.tabLabel,
-                    active && styles.tabLabelActive,
+                    isDark && styles.tabLabelDark,
+                    active &&
+                      (isDark
+                        ? styles.tabLabelActiveDark
+                        : styles.tabLabelActive),
                   ]}
                 >
                   {tab.label}
@@ -317,57 +370,99 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
   },
+  safeAreaDark: {
+    backgroundColor: '#09090b',
+  },
   loadingCenter: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 11,
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    borderBottomColor: '#e4e4e7',
     backgroundColor: '#ffffff',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  headerDark: {
+    backgroundColor: '#09090b',
+    borderBottomColor: '#27272a',
   },
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   logoBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: '#0f172a',
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: '#18181b',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  logoBadgeDark: {
+    backgroundColor: '#f4f4f5',
+  },
   logoText: {
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 11,
+    fontWeight: '700',
     color: '#ffffff',
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
+  },
+  logoTextDark: {
+    color: '#09090b',
   },
   headerTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0f172a',
-    letterSpacing: -0.2,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#18181b',
+  },
+  headerTitleDark: {
+    color: '#f4f4f5',
   },
   headerSub: {
     fontSize: 11,
-    color: '#64748b',
-    fontWeight: '500',
+    color: '#71717a',
+  },
+  headerSubDark: {
+    color: '#a1a1aa',
+  },
+  themeBtn: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#d4d4d8',
+    backgroundColor: '#fafafa',
+  },
+  themeBtnDark: {
+    borderColor: '#3f3f46',
+    backgroundColor: '#18181b',
+  },
+  themeBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#3f3f46',
+  },
+  themeBtnTextDark: {
+    color: '#e4e4e7',
   },
   syncPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 5,
     borderWidth: 1,
   },
   syncPillOnline: {
@@ -385,7 +480,7 @@ const styles = StyleSheet.create({
   },
   syncText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   connBanner: {
     backgroundColor: '#fff1f2',
@@ -399,7 +494,7 @@ const styles = StyleSheet.create({
   },
   connBannerTitle: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#881337',
   },
   connBannerSub: {
@@ -407,28 +502,35 @@ const styles = StyleSheet.create({
     color: '#9f1239',
   },
   connBannerBtn: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#18181b',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 5,
   },
   connBannerBtnText: {
     color: '#ffffff',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   body: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#fafafa',
+  },
+  bodyDark: {
+    backgroundColor: '#09090b',
   },
   bottomBarSafe: {
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
+    borderTopColor: '#e4e4e7',
+  },
+  bottomBarSafeDark: {
+    backgroundColor: '#09090b',
+    borderTopColor: '#27272a',
   },
   bottomBar: {
     flexDirection: 'row',
-    height: 52,
+    height: 50,
   },
   tabBtn: {
     flex: 1,
@@ -445,16 +547,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   tabIndicatorActive: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#18181b',
+  },
+  tabIndicatorActiveDark: {
+    backgroundColor: '#f4f4f5',
   },
   tabLabel: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#64748b',
+    fontWeight: '500',
+    color: '#71717a',
+  },
+  tabLabelDark: {
+    color: '#a1a1aa',
   },
   tabLabelActive: {
-    color: '#0f172a',
-    fontWeight: '700',
+    color: '#18181b',
+    fontWeight: '600',
+  },
+  tabLabelActiveDark: {
+    color: '#f4f4f5',
+    fontWeight: '600',
   },
 });
 

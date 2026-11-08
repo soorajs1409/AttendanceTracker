@@ -29,9 +29,21 @@ const STORAGE_LAST_SETTINGS_KEY = 'attendance_mobile_cached_settings';
 const STORAGE_ONBOARDING_KEY = 'attendance_mobile_onboarding_completed';
 const STORAGE_AUTH_USER_KEY = 'attendance_mobile_auth_user';
 const STORAGE_LOCAL_CRED_KEY = 'attendance_mobile_local_creds';
+const STORAGE_THEME_KEY = 'attendance_mobile_theme';
 
 const DEFAULT_SERVER_URL = 'http://localhost:3000';
 const DEFAULT_API_KEY = 'my_super_secret_key_123';
+
+async function getTheme(storage = getDefaultStorage()) {
+  const val = await storage.getItem(STORAGE_THEME_KEY);
+  return val === 'dark' ? 'dark' : 'light';
+}
+
+async function saveTheme(theme, storage = getDefaultStorage()) {
+  const next = theme === 'dark' ? 'dark' : 'light';
+  await storage.setItem(STORAGE_THEME_KEY, next);
+  return next;
+}
 
 async function getAuthUser(storage = getDefaultStorage()) {
   const raw = await storage.getItem(STORAGE_AUTH_USER_KEY);
@@ -421,4 +433,6 @@ module.exports = {
   flushPendingCheckIns,
   formatTime12h,
   formatDateReadable,
+  getTheme,
+  saveTheme,
 };
