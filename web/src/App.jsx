@@ -7,7 +7,7 @@ import {
   MapPinCheck,
   Wifi,
   WifiOff,
-  Smartphone,
+  // Smartphone,
 } from 'lucide-react';
 import LoginView from './components/LoginView';
 import SetupView from './components/SetupView';
@@ -88,14 +88,14 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col pb-20 sm:pb-10">
       {/* Sticky Top Header */}
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3.5 sm:px-6">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
-              <MapPinCheck className="h-5 w-5" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white">
+              <MapPinCheck className="h-4 w-4" />
             </div>
             <div>
-              <h1 className="text-base font-bold tracking-tight text-slate-900 leading-tight">
+              <h1 className="text-sm font-bold tracking-tight text-slate-900 leading-tight">
                 Attendance Tracker
               </h1>
               <p className="text-[11px] font-medium text-slate-500">
@@ -105,7 +105,7 @@ export default function App() {
           </div>
 
           {/* Desktop Navigation Tabs */}
-          <nav className="hidden sm:flex items-center gap-1 rounded-xl bg-slate-100 p-1">
+          <nav className="hidden sm:flex items-center gap-1 rounded-lg bg-slate-100 p-1">
             {TABS.map(({ id, label, Icon }) => {
               const isActive = activeTab === id;
               return (
@@ -113,13 +113,13 @@ export default function App() {
                   key={id}
                   type="button"
                   onClick={() => setActiveTab(id)}
-                  className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
                     isActive
-                      ? 'bg-white text-indigo-700 shadow-sm'
+                      ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-3.5 w-3.5" />
                   <span>{label}</span>
                 </button>
               );
@@ -127,7 +127,7 @@ export default function App() {
           </nav>
 
           <div className="flex items-center gap-2">
-            {/* Download Mobile APK Button */}
+            {/* Download Mobile APK Button (Commented out while mobile deployment is disabled)
             <a
               href="/attendance-tracker.apk"
               download="attendance-tracker.apk"
@@ -137,6 +137,7 @@ export default function App() {
               <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
               <span className="hidden sm:inline">Get App</span>
             </a>
+            */}
 
             {/* Connection Status Indicator */}
             <button
@@ -145,7 +146,7 @@ export default function App() {
                 if (connError) setActiveTab('settings');
                 else loadStatus();
               }}
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border transition ${
                 connError
                   ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
                   : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
@@ -173,7 +174,7 @@ export default function App() {
       </header>
 
       {/* Main Content Container */}
-      <main className="mx-auto w-full max-w-4xl flex-1 px-4 pt-6 sm:px-6">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pt-6 sm:px-6">
         {connError && activeTab !== 'settings' && (
           <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-900">
             <div className="text-xs sm:text-sm">

@@ -285,7 +285,7 @@ function SettingsScreen({
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Background Geofencing Engine Card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🛰️ Geofencing Engine</Text>
+        <Text style={styles.cardTitle}>Geofencing Engine</Text>
         <Text style={styles.cardSub}>
           Uses OS background regions in standalone builds, with automatic Live GPS fallback inside Expo Go.
         </Text>
@@ -295,7 +295,7 @@ function SettingsScreen({
             Status:{' '}
             <Text
               style={{
-                fontWeight: '800',
+                fontWeight: '700',
                 color: geofenceState?.active ? '#059669' : '#d97706',
               }}
             >
@@ -308,11 +308,22 @@ function SettingsScreen({
           </Text>
           <Text style={styles.permLine}>
             Location Permission:{' '}
-            {geofenceState?.backgroundGranted
-              ? 'Always Allowed ✅'
-              : geofenceState?.foregroundGranted
-                ? 'While Using App (Expo Go) ✅'
-                : 'Not Granted ⚠️'}
+            <Text
+              style={{
+                fontWeight: '700',
+                color:
+                  geofenceState?.backgroundGranted ||
+                  geofenceState?.foregroundGranted
+                    ? '#059669'
+                    : '#d97706',
+              }}
+            >
+              {geofenceState?.backgroundGranted
+                ? 'Always Allowed'
+                : geofenceState?.foregroundGranted
+                  ? 'While Using App (Expo Go)'
+                  : 'Not Granted'}
+            </Text>
           </Text>
         </View>
 
@@ -342,7 +353,7 @@ function SettingsScreen({
           <Text style={styles.simulateBtnText}>
             {simulating
               ? 'Triggering Check-In...'
-              : '⚡ Simulate Geofence Entry (Test)'}
+              : 'Simulate Geofence Entry (Test)'}
           </Text>
         </TouchableOpacity>
 
@@ -360,7 +371,7 @@ function SettingsScreen({
 
       {/* Workplace Destination & Schedule Card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>📍 Work Destination & Window</Text>
+        <Text style={styles.cardTitle}>Work Destination & Window</Text>
         <Text style={styles.cardSub}>
           Tap or drag the pin on the map, or use your current GPS location.
         </Text>
@@ -385,11 +396,11 @@ function SettingsScreen({
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.smallActionBtn, { backgroundColor: '#eef2ff' }]}
+            style={[styles.smallActionBtn, { backgroundColor: '#f1f5f9' }]}
             onPress={handleUseCurrentGps}
             disabled={locating}
           >
-            <Text style={[styles.smallActionBtnText, { color: '#4338ca' }]}>
+            <Text style={[styles.smallActionBtnText, { color: '#0f172a' }]}>
               {locating ? '...' : 'GPS'}
             </Text>
           </TouchableOpacity>
@@ -408,7 +419,7 @@ function SettingsScreen({
                 }}
               >
                 <Text style={styles.searchResultText} numberOfLines={2}>
-                  📍 {place.display_name}
+                  {place.display_name}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -548,7 +559,7 @@ function SettingsScreen({
 
       {/* Centralized Server Connection Card */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🖥️ Server Connection</Text>
+        <Text style={styles.cardTitle}>Server Connection</Text>
         <Text style={styles.cardSub}>
           Point to your local LAN IP (e.g. http://192.168.1.50:3000) or public VPS / Homelab domain.
         </Text>
@@ -567,7 +578,7 @@ function SettingsScreen({
         <View style={styles.radiusHeader}>
           <Text style={styles.label}>Pre-Shared API Key (X-API-Key)</Text>
           <TouchableOpacity onPress={() => setShowKey((v) => !v)}>
-            <Text style={{ fontSize: 12, color: '#4f46e5', fontWeight: '600' }}>
+            <Text style={{ fontSize: 12, color: '#334155', fontWeight: '600' }}>
               {showKey ? 'Hide' : 'Show'}
             </Text>
           </TouchableOpacity>
@@ -608,12 +619,12 @@ function SettingsScreen({
       {/* Re-run Setup Wizard */}
       {onResetOnboarding && (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>🔄 First-Time Setup Wizard</Text>
+          <Text style={styles.cardTitle}>First-Time Setup Wizard</Text>
           <Text style={styles.cardSub}>
             Re-open the initial setup page with map coordinates and server configuration.
           </Text>
           <TouchableOpacity
-            style={[styles.outlineBtn, { borderColor: '#94a3b8' }]}
+            style={[styles.outlineBtn, { borderColor: '#cbd5e1' }]}
             onPress={onResetOnboarding}
           >
             <Text style={[styles.outlineBtnText, { color: '#334155' }]}>
@@ -638,14 +649,14 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 18,
+    borderRadius: 12,
     padding: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
   cardTitle: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '700',
     color: '#0f172a',
   },
   cardSub: {
@@ -656,7 +667,7 @@ const styles = StyleSheet.create({
   },
   permStatusBox: {
     backgroundColor: '#f8fafc',
-    borderRadius: 12,
+    borderRadius: 8,
     padding: 12,
     gap: 4,
     marginBottom: 10,
@@ -678,7 +689,7 @@ const styles = StyleSheet.create({
   },
   smallActionBtn: {
     backgroundColor: '#f1f5f9',
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -692,7 +703,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 12,
+    borderRadius: 8,
     marginBottom: 10,
     overflow: 'hidden',
   },
@@ -708,7 +719,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#475569',
     marginBottom: 4,
   },
@@ -716,7 +727,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 12,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 9,
     fontSize: 13,
@@ -734,13 +745,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   radiusBadge: {
-    backgroundColor: '#4f46e5',
+    backgroundColor: '#0f172a',
     color: '#ffffff',
     fontSize: 11,
     fontWeight: '700',
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 8,
+    borderRadius: 6,
     overflow: 'hidden',
   },
   presetRow: {
@@ -751,63 +762,63 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     backgroundColor: '#f8fafc',
   },
   chipActive: {
-    backgroundColor: '#4f46e5',
-    borderColor: '#4f46e5',
+    backgroundColor: '#0f172a',
+    borderColor: '#0f172a',
   },
   chipText: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#475569',
   },
   chipTextActive: {
     color: '#ffffff',
   },
   primaryBtn: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 12,
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
     paddingVertical: 13,
     alignItems: 'center',
   },
   primaryBtnText: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
   },
   secondaryBtn: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
   },
   secondaryBtnText: {
     color: '#ffffff',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   simulateBtn: {
-    backgroundColor: '#eef2ff',
-    borderColor: '#c7d2fe',
+    backgroundColor: '#f8fafc',
+    borderColor: '#cbd5e1',
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
   },
   simulateBtnText: {
-    color: '#4338ca',
+    color: '#0f172a',
     fontSize: 12,
     fontWeight: '700',
   },
   outlineBtn: {
     borderWidth: 1,
     borderColor: '#cbd5e1',
-    borderRadius: 12,
-    paddingVertical: 11,
+    borderRadius: 8,
+    paddingVertical: 10,
     alignItems: 'center',
     backgroundColor: '#ffffff',
   },

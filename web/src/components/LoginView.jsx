@@ -33,12 +33,12 @@ export default function LoginView({ onLoginSuccess }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-12">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 sm:p-7 shadow-sm">
+      <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 sm:p-7 shadow-xs">
         <div className="flex flex-col items-center text-center mb-6">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm mb-3">
-            <MapPinCheck className="h-6 w-6" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white mb-3">
+            <MapPinCheck className="h-5 w-5" />
           </div>
-          <h1 className="text-lg font-bold text-slate-900">
+          <h1 className="text-base font-bold tracking-tight text-slate-900">
             Attendance Tracker
           </h1>
           <p className="text-xs text-slate-500 mt-1">
@@ -60,7 +60,7 @@ export default function LoginView({ onLoginSuccess }) {
                 placeholder="sunil"
                 autoComplete="username"
                 required
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:bg-white focus:outline-none"
               />
             </div>
           </div>
@@ -78,7 +78,7 @@ export default function LoginView({ onLoginSuccess }) {
                 placeholder="••••••••"
                 autoComplete="current-password"
                 required
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-10 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-10 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:bg-white focus:outline-none"
               />
               <button
                 type="button"
@@ -95,7 +95,7 @@ export default function LoginView({ onLoginSuccess }) {
           </div>
 
           {error && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-700">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2 text-xs font-medium text-rose-700">
               {error}
             </div>
           )}
@@ -103,7 +103,7 @@ export default function LoginView({ onLoginSuccess }) {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60 transition"
+            className="w-full rounded-lg bg-slate-900 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60 transition"
           >
             {submitting ? 'Signing in...' : 'Sign In'}
           </button>

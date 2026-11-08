@@ -47,7 +47,7 @@ function LoginScreen({ onLoginSuccess }) {
       <View style={styles.card}>
         <View style={styles.brandCenter}>
           <View style={styles.logoBadge}>
-            <Text style={styles.logoText}>📍</Text>
+            <Text style={styles.logoText}>AT</Text>
           </View>
           <Text style={styles.title}>Attendance Tracker</Text>
           <Text style={styles.subtitle}>
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 380,
     backgroundColor: '#ffffff',
-    borderRadius: 18,
+    borderRadius: 14,
     padding: 24,
     borderWidth: 1,
     borderColor: '#e2e8f0',
@@ -128,20 +128,23 @@ const styles = StyleSheet.create({
     marginBottom: 22,
   },
   logoBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#4f46e5',
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#0f172a',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
   },
   logoText: {
-    fontSize: 20,
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: 0.8,
   },
   title: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#0f172a',
   },
   subtitle: {
@@ -164,13 +167,13 @@ const styles = StyleSheet.create({
   linkText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#4f46e5',
+    color: '#334155',
   },
   input: {
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 12,
+    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 11,
     fontSize: 14,
@@ -181,7 +184,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff1f2',
     borderWidth: 1,
     borderColor: '#fecdd3',
-    borderRadius: 12,
+    borderRadius: 10,
     padding: 10,
     marginBottom: 12,
   },
@@ -191,8 +194,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   signInBtn: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 12,
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
     paddingVertical: 13,
     alignItems: 'center',
     justifyContent: 'center',

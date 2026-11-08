@@ -248,7 +248,7 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     assert.ok(notificationsSent[notificationsSent.length - 1].content.title.includes('Marked WFH'));
   });
 
-  it('allows mobile setDayAttendance to manually mark LEAVE, WFH, and unmark a day', async () => {
+  it('allows mobile setDayAttendance to manually mark LEAVE, HOLIDAY, WFH, and unmark a day', async () => {
     // Manually mark Nov 10 as LEAVE
     const resLeave = await setDayAttendance(
       '2026-11-10',
@@ -261,6 +261,18 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     assert.equal(rec.status, 'LEAVE');
     assert.equal(rec.notes, 'Personal leave');
 
+    // Manually mark Nov 11 as HOLIDAY (Public Holiday)
+    const resHoliday = await setDayAttendance(
+      '2026-11-11',
+      { status: 'HOLIDAY', notes: 'Public Holiday' },
+      { storage: mobileStorage, fetchImpl: fetchBridge }
+    );
+    assert.equal(resHoliday.success, true);
+    assert.equal(resHoliday.record.status, 'HOLIDAY');
+    rec = dbStore.getAttendanceByDate('2026-11-11');
+    assert.equal(rec.status, 'HOLIDAY');
+    assert.equal(rec.notes, 'Public Holiday');
+
     // Unmark Nov 10 (status: null)
     const resClear = await setDayAttendance(
       '2026-11-10',
@@ -271,6 +283,15 @@ describe('Attendance Tracker — Stage 3 Mobile Geofencing & Offline Queue Tests
     assert.equal(resClear.record, null);
     rec = dbStore.getAttendanceByDate('2026-11-10');
     assert.equal(rec, null);
+
+    // Unmark Nov 11 (status: null)
+    const resClearHoliday = await setDayAttendance(
+      '2026-11-11',
+      { status: null },
+      { storage: mobileStorage, fetchImpl: fetchBridge }
+    );
+    assert.equal(resClearHoliday.success, true);
+    assert.equal(resClearHoliday.record, null);
   });
 
   it('manages first-time onboarding state cleanly via storage helpers', async () => {

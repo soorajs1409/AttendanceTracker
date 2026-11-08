@@ -19,6 +19,7 @@ function migrateLegacyAttendanceTable(db) {
   if (!row) return;
   const sql = String(row.sql);
   if (
+    sql.includes("'HOLIDAY'") &&
     !sql.includes("'PRESENT'") &&
     !sql.includes("'ABSENT'") &&
     !sql.includes("'LATE'")
@@ -31,7 +32,7 @@ function migrateLegacyAttendanceTable(db) {
     CREATE TABLE attendance_log_new (
       date TEXT PRIMARY KEY,
       check_in_time TEXT,
-      status TEXT NOT NULL CHECK(status IN ('WFO', 'WFH', 'LEAVE')),
+      status TEXT NOT NULL CHECK(status IN ('WFO', 'WFH', 'LEAVE', 'HOLIDAY')),
       trigger_type TEXT DEFAULT 'GEOFENCE',
       latitude REAL,
       longitude REAL,
@@ -51,6 +52,7 @@ function migrateLegacyAttendanceTable(db) {
         WHEN 'WFO' THEN 'WFO'
         WHEN 'WFH' THEN 'WFH'
         WHEN 'LEAVE' THEN 'LEAVE'
+        WHEN 'HOLIDAY' THEN 'HOLIDAY'
         ELSE 'WFH'
       END,
       trigger_type, latitude, longitude, notes
@@ -101,7 +103,7 @@ function createDatabase(dbPath) {
     CREATE TABLE IF NOT EXISTS attendance_log (
       date TEXT PRIMARY KEY,
       check_in_time TEXT,
-      status TEXT NOT NULL CHECK(status IN ('WFO', 'WFH', 'LEAVE')),
+      status TEXT NOT NULL CHECK(status IN ('WFO', 'WFH', 'LEAVE', 'HOLIDAY')),
       trigger_type TEXT DEFAULT 'GEOFENCE',
       latitude REAL,
       longitude REAL,

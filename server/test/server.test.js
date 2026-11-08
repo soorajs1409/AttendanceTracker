@@ -252,7 +252,7 @@ describe('Attendance Tracker — Server (WFO / WFH / LEAVE model)', () => {
     assert.equal(store.getAttendanceByDate('2026-11-10'), null);
   });
 
-  it('PUT /api/attendance/:date rejects statuses other than WFO / WFH / LEAVE', async () => {
+  it('PUT /api/attendance/:date rejects statuses other than WFO / WFH / LEAVE / HOLIDAY', async () => {
     for (const status of ['PRESENT', 'ABSENT', 'LATE', 'whatever']) {
       const res = await server.inject({
         method: 'PUT',
@@ -264,14 +264,23 @@ describe('Attendance Tracker — Server (WFO / WFH / LEAVE model)', () => {
     }
   });
 
-  it('GET /api/history returns monthly stats including wfo, wfh, leave counts, percentages and ratios', async () => {
-    // Add a LEAVE on 2026-11-12
+  it('GET /api/history computes total_working_days (excluding Sat, Sun, Leave, Holiday) and WFO/WFH percentages based on working days', async () => {
+    // Add a LEAVE on 2026-11-12 (Thursday) and a HOLIDAY on 2026-11-13 (Friday)
     await server.inject({
       method: 'PUT',
       url: '/api/attendance/2026-11-12',
       headers: jsonAuth,
       body: { status: 'LEAVE', notes: 'Doctor appointment' },
     });
+    const holidayRes = await server.inject({
+      method: 'PUT',
+      url: '/api/attendance/2026-11-13',
+      headers: jsonAuth,
+      body: { status: 'HOLIDAY', notes: 'Public Holiday' },
+    });
+    assert.equal(holidayRes.status, 200);
+    const holidayData = await holidayRes.json();
+    assert.equal(holidayData.record.status, 'HOLIDAY');
 
     const res = await server.inject({
       method: 'GET',
@@ -282,17 +291,20 @@ describe('Attendance Tracker — Server (WFO / WFH / LEAVE model)', () => {
     assert.equal(res.status, 200);
     const data = await res.json();
     assert.equal(data.month, '2026-11');
-    // Marked days: 05 WFO, 06 WFH, 09 WFO, 12 LEAVE -> total = 4 (wfo: 2, wfh: 1, leave: 1)
-    assert.equal(data.summary.total, 4);
+    // Nov 2026 has 30 days, 9 weekend days -> 21 weekdays.
+    // Subtract 1 weekday LEAVE (Nov 12) and 1 weekday HOLIDAY (Nov 13) -> 19 total working days.
+    assert.equal(data.summary.calendar_days, 30);
+    assert.equal(data.summary.weekend_days, 9);
+    assert.equal(data.summary.total_working_days, 19);
     assert.equal(data.summary.wfo, 2);
     assert.equal(data.summary.wfh, 1);
     assert.equal(data.summary.leave, 1);
-    assert.equal(data.summary.wfo_percent, 50);
-    assert.equal(data.summary.wfh_percent, 25);
-    assert.equal(data.summary.leave_percent, 25);
-    assert.equal(data.summary.wfo_ratio, 0.5);
-    assert.equal(data.summary.wfh_ratio, 0.25);
-    assert.equal(data.summary.leave_ratio, 0.25);
+    assert.equal(data.summary.holiday, 1);
+    // Percentages based on 19 working days: 2/19 = 10.5%, 1/19 = 5.3%
+    assert.equal(data.summary.wfo_percent, 10.5);
+    assert.equal(data.summary.wfh_percent, 5.3);
+    assert.equal(data.summary.wfo_ratio, undefined);
+    assert.equal(data.summary.wfh_ratio, undefined);
   });
 
   it('GET / serves the compiled Web Portal SPA when web/dist exists', async (t) => {

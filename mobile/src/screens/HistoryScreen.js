@@ -17,7 +17,12 @@ const {
 } = require('../api');
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const STATUS_OPTIONS = ['WFO', 'WFH', 'LEAVE'];
+const STATUS_OPTIONS = [
+  { id: 'WFO', label: 'WFO (Office)' },
+  { id: 'WFH', label: 'WFH (Home)' },
+  { id: 'LEAVE', label: 'Leave' },
+  { id: 'HOLIDAY', label: 'Public Holiday' },
+];
 
 function shiftMonth(monthStr, delta) {
   const [y, m] = monthStr.split('-').map(Number);
@@ -35,15 +40,15 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
   const todayDateStr =
     statusData?.today?.date || new Date().toISOString().slice(0, 10);
   const defaultMonth = todayDateStr.slice(0, 7);
-  const workDays = statusData?.settings?.work_days || [1, 2, 3, 4, 5];
 
   const [month, setMonth] = useState(defaultMonth);
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState({
-    total: 0,
+    total_working_days: 0,
     wfo: 0,
     wfh: 0,
     leave: 0,
+    holiday: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -61,7 +66,15 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
     try {
       const data = await fetchHistory(targetMonth);
       setRecords(data.records || []);
-      setSummary(data.summary || { total: 0, wfo: 0, wfh: 0, leave: 0 });
+      setSummary(
+        data.summary || {
+          total_working_days: 0,
+          wfo: 0,
+          wfh: 0,
+          leave: 0,
+          holiday: 0,
+        }
+      );
     } catch (err) {
       setError(err.message || 'Failed to load monthly history.');
     } finally {
@@ -105,19 +118,18 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
   for (let day = 1; day <= daysInMonth; day += 1) {
     const dateStr = `${month}-${String(day).padStart(2, '0')}`;
     const dow = new Date(yearNum, monthNum - 1, day).getDay();
-    const isWorkDay = workDays.includes(dow);
+    const isWeekend = dow === 0 || dow === 6;
     const rec = recordMap[dateStr] || null;
 
     cells.push({
       day,
       dateStr,
-      isWorkDay,
+      isWeekend,
       rec,
       isToday: dateStr === todayDateStr,
     });
   }
 
-  // Pad trailing cells to full 7-column rows
   while (cells.length % 7 !== 0) {
     cells.push(null);
   }
@@ -140,7 +152,9 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
       });
       setSaveMsg({
         type: 'success',
-        text: `Marked ${selectedDate} as ${editStatus}.`,
+        text: `Marked ${selectedDate} as ${
+          editStatus === 'HOLIDAY' ? 'Public Holiday' : editStatus
+        }.`,
       });
       await loadMonth(month);
       if (onRefreshStatus) await onRefreshStatus();
@@ -161,7 +175,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
       await setDayAttendance(selectedDate, { status: null });
       setSaveMsg({
         type: 'success',
-        text: `Cleared attendance record for ${selectedDate}. Day is now unmarked.`,
+        text: `Cleared attendance record for ${selectedDate}.`,
       });
       await loadMonth(month);
       if (onRefreshStatus) await onRefreshStatus();
@@ -182,7 +196,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
         <View style={{ flex: 1, paddingRight: 8 }}>
           <Text style={styles.monthTitle}>{formatMonthLabel(month)}</Text>
           <Text style={styles.monthSub}>
-            Only explicitly recorded days show dots. Tap any date to inspect.
+            Select any date to record WFO, WFH, Leave, or Public Holiday
           </Text>
         </View>
 
@@ -200,7 +214,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
               setSelectedDate(todayDateStr);
             }}
           >
-            <Text style={styles.todayBtnText}>Today</Text>
+            <Text style={styles.todayBtnText}>Current</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.navBtn}
@@ -211,24 +225,30 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
         </View>
       </View>
 
-      {/* Summary Stats Row: WFO, WFH, Leave */}
+      {/* Summary Stats Row: WFO, WFH, Leave, Public Holidays */}
       <View style={styles.statsGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>WFO (Office)</Text>
+          <Text style={styles.statLabel}>WFO</Text>
           <Text style={[styles.statValue, { color: '#2563eb' }]}>
             {summary.wfo || 0}
           </Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>WFH (Home)</Text>
+          <Text style={styles.statLabel}>WFH</Text>
           <Text style={[styles.statValue, { color: '#059669' }]}>
             {summary.wfh || 0}
           </Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Leave</Text>
+          <Text style={styles.statLabel}>LEAVE</Text>
           <Text style={[styles.statValue, { color: '#e11d48' }]}>
             {summary.leave || 0}
+          </Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>HOLIDAYS</Text>
+          <Text style={[styles.statValue, { color: '#7c3aed' }]}>
+            {summary.holiday || 0}
           </Text>
         </View>
       </View>
@@ -251,7 +271,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
 
         {loading ? (
           <View style={{ paddingVertical: 28 }}>
-            <ActivityIndicator color="#4f46e5" />
+            <ActivityIndicator color="#0f172a" />
           </View>
         ) : (
           rows.map((row, rIdx) => (
@@ -268,18 +288,21 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
 
                 const isSelected = cell.dateStr === selectedDate;
                 let dotColor = null;
-                let cellBg = '#f8fafc';
+                let cellBg = cell.isWeekend ? '#f8fafc' : '#f1f5f9';
 
                 if (cell.rec) {
                   if (cell.rec.status === 'WFO') {
                     dotColor = '#2563eb';
                     cellBg = '#eff6ff';
                   } else if (cell.rec.status === 'WFH') {
-                    dotColor = '#10b981';
+                    dotColor = '#059669';
                     cellBg = '#ecfdf5';
                   } else if (cell.rec.status === 'LEAVE') {
-                    dotColor = '#f43f5e';
+                    dotColor = '#e11d48';
                     cellBg = '#fff1f2';
+                  } else if (cell.rec.status === 'HOLIDAY') {
+                    dotColor = '#7c3aed';
+                    cellBg = '#f5f3ff';
                   }
                 }
 
@@ -296,7 +319,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
                     <Text
                       style={[
                         styles.dayNumber,
-                        !cell.isWorkDay && !cell.rec && { color: '#94a3b8' },
+                        cell.isWeekend && !cell.rec && { color: '#94a3b8' },
                         cell.isToday && styles.dayNumberToday,
                       ]}
                     >
@@ -323,17 +346,16 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
             <Text style={styles.legendText}>WFO</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.dot, { backgroundColor: '#10b981' }]} />
+            <View style={[styles.dot, { backgroundColor: '#059669' }]} />
             <Text style={styles.legendText}>WFH</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.dot, { backgroundColor: '#f43f5e' }]} />
+            <View style={[styles.dot, { backgroundColor: '#e11d48' }]} />
             <Text style={styles.legendText}>Leave</Text>
           </View>
           <View style={styles.legendItem}>
-            <Text style={[styles.legendText, { color: '#94a3b8' }]}>
-              (Unmarked clean)
-            </Text>
+            <View style={[styles.dot, { backgroundColor: '#7c3aed' }]} />
+            <Text style={styles.legendText}>Public Holiday</Text>
           </View>
         </View>
       </View>
@@ -349,7 +371,11 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
           <View style={styles.recordDetailBox}>
             <View style={styles.detailRow}>
               <Text style={styles.detailKey}>Status</Text>
-              <Text style={styles.detailVal}>{selectedRecord.status}</Text>
+              <Text style={styles.detailVal}>
+                {selectedRecord.status === 'HOLIDAY'
+                  ? 'PUBLIC HOLIDAY'
+                  : selectedRecord.status}
+              </Text>
             </View>
             {selectedRecord.check_in_time ? (
               <View style={styles.detailRow}>
@@ -379,25 +405,24 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
         )}
 
         <Text style={styles.formSectionLabel}>
-          {selectedRecord ? 'Update Day Record' : 'Record Day Attendance'}
+          {selectedRecord ? 'Update Day Category' : 'Record Day Category'}
         </Text>
 
-        {/* Status Selector Pills: WFO, WFH, LEAVE */}
-        <View style={styles.statusSelectorRow}>
+        {/* 2x2 Status Selector Grid: WFO, WFH, LEAVE, HOLIDAY */}
+        <View style={styles.statusSelectorGrid}>
           {STATUS_OPTIONS.map((opt) => {
-            const active = editStatus === opt;
+            const active = editStatus === opt.id;
             let activeStyle = styles.statusOptBtnActiveBlue;
-            if (opt === 'WFH') activeStyle = styles.statusOptBtnActiveGreen;
-            if (opt === 'LEAVE') activeStyle = styles.statusOptBtnActiveRose;
+            if (opt.id === 'WFH') activeStyle = styles.statusOptBtnActiveGreen;
+            if (opt.id === 'LEAVE') activeStyle = styles.statusOptBtnActiveRose;
+            if (opt.id === 'HOLIDAY')
+              activeStyle = styles.statusOptBtnActiveViolet;
 
             return (
               <TouchableOpacity
-                key={opt}
-                style={[
-                  styles.statusOptBtn,
-                  active && activeStyle,
-                ]}
-                onPress={() => setEditStatus(opt)}
+                key={opt.id}
+                style={[styles.statusOptBtn, active && activeStyle]}
+                onPress={() => setEditStatus(opt.id)}
               >
                 <Text
                   style={[
@@ -405,7 +430,7 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
                     active && styles.statusOptTextActive,
                   ]}
                 >
-                  {opt}
+                  {opt.label}
                 </Text>
               </TouchableOpacity>
             );
@@ -427,10 +452,14 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
 
         <Text style={styles.inputLabel}>Note (Optional)</Text>
         <TextInput
-          style={[styles.input, { minHeight: 56 }]}
+          style={[styles.input, { minHeight: 52 }]}
           value={editNote}
           onChangeText={setEditNote}
-          placeholder="Add an optional note..."
+          placeholder={
+            editStatus === 'HOLIDAY'
+              ? 'e.g. National Holiday, Festival...'
+              : 'Add an optional note...'
+          }
           placeholderTextColor="#94a3b8"
           multiline
         />
@@ -445,7 +474,11 @@ function HistoryScreen({ statusData, onRefreshStatus }) {
               <ActivityIndicator color="#ffffff" size="small" />
             ) : (
               <Text style={styles.saveBtnText}>
-                {selectedRecord ? 'Save Changes' : `Mark as ${editStatus}`}
+                {selectedRecord
+                  ? 'Save Changes'
+                  : `Mark as ${
+                      editStatus === 'HOLIDAY' ? 'Public Holiday' : editStatus
+                    }`}
               </Text>
             )}
           </TouchableOpacity>
@@ -484,11 +517,11 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 32,
-    gap: 14,
+    gap: 12,
   },
   monthHeader: {
     backgroundColor: '#ffffff',
-    borderRadius: 14,
+    borderRadius: 12,
     padding: 14,
     borderWidth: 1,
     borderColor: '#e2e8f0',
@@ -498,7 +531,7 @@ const styles = StyleSheet.create({
   },
   monthTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#0f172a',
   },
   monthSub: {
@@ -509,16 +542,17 @@ const styles = StyleSheet.create({
   navGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   navBtn: {
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 8,
-    width: 32,
-    height: 32,
+    borderRadius: 6,
+    width: 30,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#f8fafc',
   },
   navBtnText: {
     fontSize: 16,
@@ -528,36 +562,40 @@ const styles = StyleSheet.create({
   todayBtn: {
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 8,
+    borderRadius: 6,
     paddingHorizontal: 8,
-    height: 32,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#f8fafc',
   },
   todayBtnText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#334155',
   },
   statsGrid: {
     flexDirection: 'row',
-    gap: 10,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   statCard: {
     flex: 1,
+    minWidth: '22%',
     backgroundColor: '#ffffff',
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: 12,
+    padding: 10,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
   statLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#64748b',
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.4,
   },
   statValue: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
     marginTop: 2,
   },
@@ -566,7 +604,7 @@ const styles = StyleSheet.create({
     borderColor: '#fecdd3',
     borderWidth: 1,
     padding: 10,
-    borderRadius: 10,
+    borderRadius: 8,
   },
   errorText: {
     color: '#9f1239',
@@ -574,8 +612,8 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 12,
+    padding: 15,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
@@ -586,7 +624,7 @@ const styles = StyleSheet.create({
   weekHeaderText: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: '#94a3b8',
     textTransform: 'uppercase',
@@ -603,7 +641,7 @@ const styles = StyleSheet.create({
   dayCell: {
     flex: 1,
     aspectRatio: 1,
-    borderRadius: 8,
+    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 5,
@@ -611,15 +649,16 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   dayCellSelected: {
-    borderColor: '#4f46e5',
+    borderColor: '#0f172a',
   },
   dayNumber: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#1e293b',
   },
   dayNumberToday: {
-    color: '#4f46e5',
+    color: '#0f172a',
+    fontWeight: '800',
     textDecorationLine: 'underline',
   },
   dot: {
@@ -651,20 +690,22 @@ const styles = StyleSheet.create({
     color: '#64748b',
   },
   inspectorLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
-    color: '#4f46e5',
-    letterSpacing: 0.5,
+    color: '#64748b',
+    letterSpacing: 0.6,
   },
   inspectorDate: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#0f172a',
     marginTop: 2,
   },
   recordDetailBox: {
     backgroundColor: '#f8fafc',
-    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    borderRadius: 8,
     padding: 10,
     marginTop: 8,
     gap: 6,
@@ -688,18 +729,20 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   formSectionLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#1e293b',
     marginTop: 12,
     marginBottom: 8,
   },
-  statusSelectorRow: {
+  statusSelectorGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 10,
   },
   statusOptBtn: {
+    minWidth: '47%',
     flex: 1,
     paddingVertical: 9,
     borderRadius: 8,
@@ -713,15 +756,19 @@ const styles = StyleSheet.create({
     borderColor: '#2563eb',
   },
   statusOptBtnActiveGreen: {
-    backgroundColor: '#10b981',
-    borderColor: '#10b981',
+    backgroundColor: '#059669',
+    borderColor: '#059669',
   },
   statusOptBtnActiveRose: {
-    backgroundColor: '#f43f5e',
-    borderColor: '#f43f5e',
+    backgroundColor: '#e11d48',
+    borderColor: '#e11d48',
+  },
+  statusOptBtnActiveViolet: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
   },
   statusOptText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#475569',
   },
@@ -738,7 +785,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 13,
@@ -750,22 +797,22 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   saveBtn: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
     paddingVertical: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveBtnText: {
     color: '#ffffff',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   clearBtn: {
-    backgroundColor: '#f1f5f9',
+    backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 10,
+    borderRadius: 8,
     paddingVertical: 9,
     alignItems: 'center',
   },

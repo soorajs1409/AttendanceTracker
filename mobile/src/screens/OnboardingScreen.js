@@ -260,9 +260,9 @@ function OnboardingScreen({ onComplete }) {
       {/* Top Welcome Banner */}
       <View style={styles.heroCard}>
         <View style={styles.heroBadge}>
-          <Text style={styles.heroBadgeText}>📍 Welcome</Text>
+          <Text style={styles.heroBadgeText}>INITIAL SETUP</Text>
         </View>
-        <Text style={styles.heroTitle}>Initial App Setup</Text>
+        <Text style={styles.heroTitle}>Configure Server & Workplace</Text>
         <Text style={styles.heroSub}>
           Configure your server URL and workplace map coordinates to start tracking your Work from Office (WFO) automatically.
         </Text>
@@ -316,7 +316,7 @@ function OnboardingScreen({ onComplete }) {
           disabled={testingConn}
         >
           {testingConn ? (
-            <ActivityIndicator color="#4f46e5" size="small" />
+            <ActivityIndicator color="#0f172a" size="small" />
           ) : (
             <Text style={styles.outlineBtnText}>Test Server Connection</Text>
           )}
@@ -397,7 +397,7 @@ function OnboardingScreen({ onComplete }) {
           {locating ? (
             <ActivityIndicator color="#ffffff" size="small" />
           ) : (
-            <Text style={styles.gpsBtnText}>📍 Use Current GPS Location</Text>
+            <Text style={styles.gpsBtnText}>Use Current GPS Location</Text>
           )}
         </TouchableOpacity>
 
@@ -432,7 +432,7 @@ function OnboardingScreen({ onComplete }) {
                 onPress={() => handleSelectSearchResult(item)}
               >
                 <Text style={styles.resultText} numberOfLines={2}>
-                  📍 {item.display_name}
+                  {item.display_name}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -551,7 +551,7 @@ function OnboardingScreen({ onComplete }) {
         {finishing ? (
           <ActivityIndicator color="#ffffff" size="small" />
         ) : (
-          <Text style={styles.finishBtnText}>Complete Setup & Enter App 🚀</Text>
+          <Text style={styles.finishBtnText}>Complete Setup & Continue</Text>
         )}
       </TouchableOpacity>
     </ScrollView>
@@ -569,37 +569,40 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   heroCard: {
-    backgroundColor: '#4338ca',
-    borderRadius: 18,
-    padding: 20,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   heroBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
     marginBottom: 8,
   },
   heroBadgeText: {
-    color: '#ffffff',
-    fontSize: 12,
+    color: '#334155',
+    fontSize: 10,
     fontWeight: '700',
+    letterSpacing: 0.6,
   },
   heroTitle: {
-    color: '#ffffff',
-    fontSize: 22,
-    fontWeight: '800',
+    color: '#0f172a',
+    fontSize: 19,
+    fontWeight: '700',
   },
   heroSub: {
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontSize: 13,
-    marginTop: 6,
+    color: '#64748b',
+    fontSize: 12,
+    marginTop: 4,
     lineHeight: 18,
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
@@ -614,21 +617,21 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f1f5f9',
   },
   stepCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#4f46e5',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#0f172a',
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepNumber: {
     color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '700',
   },
   cardTitle: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '700',
     color: '#0f172a',
   },
   cardSub: {
@@ -649,14 +652,14 @@ const styles = StyleSheet.create({
   },
   linkText: {
     fontSize: 12,
-    color: '#4f46e5',
+    color: '#334155',
     fontWeight: '600',
   },
   input: {
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 9,
     fontSize: 13,
@@ -668,8 +671,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   gpsBtn: {
-    backgroundColor: '#2563eb',
-    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
     marginBottom: 6,
@@ -677,21 +680,21 @@ const styles = StyleSheet.create({
   gpsBtnText: {
     color: '#ffffff',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   outlineBtn: {
     borderWidth: 1,
-    borderColor: '#4f46e5',
-    borderRadius: 10,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
   },
   outlineBtnText: {
-    color: '#4f46e5',
+    color: '#0f172a',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   searchRow: {
     flexDirection: 'row',
@@ -700,20 +703,20 @@ const styles = StyleSheet.create({
   },
   searchBtn: {
     backgroundColor: '#0f172a',
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 14,
     justifyContent: 'center',
   },
   searchBtnText: {
     color: '#ffffff',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   resultsBox: {
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 10,
+    borderRadius: 8,
     overflow: 'hidden',
     marginBottom: 10,
   },
@@ -728,7 +731,7 @@ const styles = StyleSheet.create({
   },
   mapContainer: {
     height: 220,
-    borderRadius: 12,
+    borderRadius: 10,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#e2e8f0',
@@ -742,14 +745,14 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     backgroundColor: '#f8fafc',
   },
   chipActive: {
-    backgroundColor: '#4f46e5',
-    borderColor: '#4f46e5',
+    backgroundColor: '#0f172a',
+    borderColor: '#0f172a',
   },
   chipText: {
     fontSize: 12,
@@ -760,21 +763,16 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   finishBtn: {
-    backgroundColor: '#059669',
-    borderRadius: 14,
-    paddingVertical: 15,
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#059669',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 3,
   },
   finishBtnText: {
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '700',
   },
   disabledBtn: {
     opacity: 0.6,

@@ -6,6 +6,7 @@ import {
   Building2,
   Home,
   CalendarOff,
+  Landmark,
   Clock,
   Save,
   Trash2,
@@ -18,7 +19,12 @@ import {
 } from '../api';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const STATUS_OPTIONS = ['WFO', 'WFH', 'LEAVE'];
+const STATUS_OPTIONS = [
+  { id: 'WFO', label: 'WFO (Office)' },
+  { id: 'WFH', label: 'WFH (Home)' },
+  { id: 'LEAVE', label: 'Leave' },
+  { id: 'HOLIDAY', label: 'Public Holiday' },
+];
 
 function shiftMonth(monthStr, delta) {
   const [y, m] = monthStr.split('-').map(Number);
@@ -40,10 +46,11 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
   const [month, setMonth] = useState(defaultMonth);
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState({
-    total: 0,
+    total_working_days: 0,
     wfo: 0,
     wfh: 0,
     leave: 0,
+    holiday: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -62,7 +69,13 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
       const data = await fetchHistory(targetMonth);
       setRecords(data.records || []);
       setSummary(
-        data.summary || { total: 0, wfo: 0, wfh: 0, leave: 0 }
+        data.summary || {
+          total_working_days: 0,
+          wfo: 0,
+          wfh: 0,
+          leave: 0,
+          holiday: 0,
+        }
       );
     } catch (err) {
       setError(err.message || 'Failed to load monthly attendance history.');
@@ -110,12 +123,14 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
   for (let day = 1; day <= daysInMonth; day += 1) {
     const dateStr = `${month}-${String(day).padStart(2, '0')}`;
     const dow = new Date(yearNum, monthNum - 1, day).getDay();
+    const isWeekend = dow === 0 || dow === 6;
     const rec = recordMap[dateStr] || null;
 
     calendarCells.push({
       day,
       dateStr,
       dow,
+      isWeekend,
       rec,
       isToday: dateStr === todayDateStr,
     });
@@ -135,7 +150,9 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
       });
       setSaveMessage({
         type: 'success',
-        text: `Marked ${selectedDate} as ${editStatus}.`,
+        text: `Marked ${selectedDate} as ${
+          editStatus === 'HOLIDAY' ? 'Public Holiday' : editStatus
+        }.`,
       });
       await loadMonth(month);
       if (onRefreshStatus) await onRefreshStatus();
@@ -156,7 +173,7 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
       await setDayAttendance(selectedDate, { status: null });
       setSaveMessage({
         type: 'success',
-        text: `Cleared attendance mark for ${selectedDate}. Day is now unmarked.`,
+        text: `Cleared attendance mark for ${selectedDate}.`,
       });
       await loadMonth(month);
       if (onRefreshStatus) await onRefreshStatus();
@@ -171,107 +188,121 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Month Header & Navigation */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-white border border-slate-200 p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-white border border-slate-200 p-4 shadow-xs">
         <div className="flex items-center gap-3">
-          <div className="rounded-lg bg-indigo-50 p-2 text-indigo-600">
+          <div className="rounded-lg bg-slate-100 p-2 text-slate-700">
             <CalendarIcon className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-900">
+            <h2 className="text-base font-bold tracking-tight text-slate-900">
               {formatMonthLabel(month)}
             </h2>
             <p className="text-xs text-slate-500">
-              Calendar View • Unmarked days stay clean
+              Select any date to record WFO, WFH, Leave, or Public Holiday
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setMonth(shiftMonth(month, -1))}
-            className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 transition"
-            title="Previous month"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMonth(defaultMonth);
-              setSelectedDate(todayDateStr);
-            }}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
-          >
-            This Month
-          </button>
-          <button
-            type="button"
-            onClick={() => setMonth(shiftMonth(month, 1))}
-            className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 transition"
-            title="Next month"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
+          <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50/60 p-0.5">
+            <button
+              type="button"
+              onClick={() => setMonth(shiftMonth(month, -1))}
+              className="rounded-md p-1.5 text-slate-600 hover:bg-white hover:text-slate-900 transition"
+              title="Previous month"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMonth(defaultMonth);
+                setSelectedDate(todayDateStr);
+              }}
+              className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-slate-900 transition"
+            >
+              Current
+            </button>
+            <button
+              type="button"
+              onClick={() => setMonth(shiftMonth(month, 1))}
+              className="rounded-md p-1.5 text-slate-600 hover:bg-white hover:text-slate-900 transition"
+              title="Next month"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* 3 Summary Metrics: WFO, WFH, Leave */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-sm">
+      {/* 4 Summary Metrics: WFO, WFH, Leave, Public Holidays */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-xs">
           <div className="flex items-center justify-between text-blue-600">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               WFO (Office)
             </span>
             <Building2 className="h-4 w-4" />
           </div>
-          <p className="mt-1 text-2xl font-bold text-blue-600">
+          <p className="mt-1.5 text-2xl font-bold text-blue-600 tabular-nums">
             {summary.wfo || 0}
           </p>
         </div>
 
-        <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-sm">
+        <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-xs">
           <div className="flex items-center justify-between text-emerald-600">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               WFH (Home)
             </span>
             <Home className="h-4 w-4" />
           </div>
-          <p className="mt-1 text-2xl font-bold text-emerald-600">
+          <p className="mt-1.5 text-2xl font-bold text-emerald-600 tabular-nums">
             {summary.wfh || 0}
           </p>
         </div>
 
-        <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-sm">
+        <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-xs">
           <div className="flex items-center justify-between text-rose-600">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               Leave
             </span>
             <CalendarOff className="h-4 w-4" />
           </div>
-          <p className="mt-1 text-2xl font-bold text-rose-600">
+          <p className="mt-1.5 text-2xl font-bold text-rose-600 tabular-nums">
             {summary.leave || 0}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-xs">
+          <div className="flex items-center justify-between text-violet-600">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Public Holidays
+            </span>
+            <Landmark className="h-4 w-4" />
+          </div>
+          <p className="mt-1.5 text-2xl font-bold text-violet-600 tabular-nums">
+            {summary.holiday || 0}
           </p>
         </div>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-800">
           {error}
         </div>
       )}
 
       {/* Calendar Grid + Day Inspector */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 rounded-xl bg-white border border-slate-200 p-4 sm:p-5 shadow-sm">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 rounded-xl bg-white border border-slate-200 p-4 sm:p-5 shadow-xs">
           {/* Weekday Headers */}
           <div className="grid grid-cols-7 gap-1.5 text-center mb-2">
             {WEEKDAYS.map((dayName) => (
               <div
                 key={dayName}
-                className="py-1 text-xs font-semibold uppercase tracking-wider text-slate-400"
+                className="py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400"
               >
                 {dayName}
               </div>
@@ -287,21 +318,27 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
 
               const isSelected = cell.dateStr === selectedDate;
               let dotColor = null;
-              let cellBg = 'bg-slate-50/50 hover:bg-slate-100 text-slate-700';
+              let cellBg = cell.isWeekend
+                ? 'bg-slate-50/40 hover:bg-slate-100/70 text-slate-400'
+                : 'bg-slate-50/80 hover:bg-slate-100 text-slate-700';
 
               if (cell.rec) {
                 if (cell.rec.status === 'WFO') {
                   dotColor = 'bg-blue-600';
                   cellBg =
-                    'bg-blue-50/70 hover:bg-blue-100/80 text-blue-950 border-blue-200';
+                    'bg-blue-50/80 hover:bg-blue-100/80 text-blue-950 border-blue-200';
                 } else if (cell.rec.status === 'WFH') {
-                  dotColor = 'bg-emerald-500';
+                  dotColor = 'bg-emerald-600';
                   cellBg =
-                    'bg-emerald-50/70 hover:bg-emerald-100/80 text-emerald-950 border-emerald-200';
+                    'bg-emerald-50/80 hover:bg-emerald-100/80 text-emerald-950 border-emerald-200';
                 } else if (cell.rec.status === 'LEAVE') {
-                  dotColor = 'bg-rose-500';
+                  dotColor = 'bg-rose-600';
                   cellBg =
-                    'bg-rose-50/70 hover:bg-rose-100/80 text-rose-950 border-rose-200';
+                    'bg-rose-50/80 hover:bg-rose-100/80 text-rose-950 border-rose-200';
+                } else if (cell.rec.status === 'HOLIDAY') {
+                  dotColor = 'bg-violet-600';
+                  cellBg =
+                    'bg-violet-50/80 hover:bg-violet-100/80 text-violet-950 border-violet-200';
                 }
               }
 
@@ -312,14 +349,14 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
                   onClick={() => setSelectedDate(cell.dateStr)}
                   className={`relative aspect-square rounded-lg border p-1.5 flex flex-col items-center justify-between transition ${
                     isSelected
-                      ? 'ring-2 ring-indigo-600 border-indigo-600'
+                      ? 'ring-2 ring-slate-900 border-slate-900'
                       : 'border-transparent'
                   } ${cellBg}`}
                 >
                   <span
-                    className={`text-xs sm:text-sm font-semibold ${
+                    className={`text-xs sm:text-sm font-semibold tabular-nums ${
                       cell.isToday
-                        ? 'underline decoration-indigo-600 decoration-2 underline-offset-2'
+                        ? 'underline decoration-slate-900 decoration-2 underline-offset-2'
                         : ''
                     }`}
                   >
@@ -331,7 +368,7 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
                       <span className={`h-2 w-2 rounded-full ${dotColor}`} />
                     )}
                     {cell.rec?.check_in_time && (
-                      <span className="hidden sm:block text-[10px] font-medium opacity-75 leading-none">
+                      <span className="hidden sm:block text-[10px] font-medium opacity-75 leading-none tabular-nums">
                         {cell.rec.check_in_time.slice(0, 5)}
                       </span>
                     )}
@@ -342,18 +379,22 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
           </div>
 
           {/* Legend */}
-          <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-5 text-xs text-slate-600">
+          <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-4 text-xs text-slate-600">
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full bg-blue-600" />
-              WFO (Office)
+              WFO
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-              WFH (Home)
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-600" />
+              WFH
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+              <span className="h-2.5 w-2.5 rounded-full bg-rose-600" />
               Leave
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-violet-600" />
+              Public Holiday
             </span>
             <span className="inline-flex items-center gap-1.5 text-slate-400">
               <span className="h-2.5 w-2.5 rounded-full border border-slate-300 bg-transparent" />
@@ -363,42 +404,46 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
         </div>
 
         {/* Day Inspector & Manual Override Panel */}
-        <div className="rounded-xl bg-white border border-slate-200 p-5 shadow-sm flex flex-col justify-between">
+        <div className="rounded-xl bg-white border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   Selected Date
                 </p>
-                <h3 className="text-base font-bold text-slate-900 mt-0.5">
+                <h3 className="text-sm font-bold text-slate-900 mt-0.5">
                   {formatDateReadable(selectedDate)}
                 </h3>
               </div>
               {loading && (
-                <span className="text-xs text-slate-400">Loading...</span>
+                <span className="text-xs text-slate-400">Syncing...</span>
               )}
             </div>
 
             {selectedRecord ? (
-              <div className="mt-4 space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+              <div className="mt-4 space-y-2 rounded-lg bg-slate-50 border border-slate-100 p-3 text-xs text-slate-700">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Status</span>
                   <span
-                    className={`font-bold px-2 py-0.5 rounded ${
+                    className={`font-semibold px-2 py-0.5 rounded-md border ${
                       selectedRecord.status === 'WFO'
-                        ? 'bg-blue-100 text-blue-800'
+                        ? 'bg-blue-50 text-blue-700 border-blue-200'
                         : selectedRecord.status === 'WFH'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-rose-100 text-rose-800'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : selectedRecord.status === 'HOLIDAY'
+                            ? 'bg-violet-50 text-violet-700 border-violet-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
                     }`}
                   >
-                    {selectedRecord.status}
+                    {selectedRecord.status === 'HOLIDAY'
+                      ? 'PUBLIC HOLIDAY'
+                      : selectedRecord.status}
                   </span>
                 </div>
                 {selectedRecord.check_in_time && (
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Check-in Time</span>
-                    <span className="font-semibold text-slate-900">
+                    <span className="font-semibold text-slate-900 tabular-nums">
                       {formatTime12h(selectedRecord.check_in_time)}
                     </span>
                   </div>
@@ -410,46 +455,52 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
                   </span>
                 </div>
                 {selectedRecord.notes && (
-                  <div className="pt-1 border-t border-slate-200/60">
+                  <div className="pt-1.5 border-t border-slate-200/60">
                     <span className="text-slate-500 block mb-0.5">Notes</span>
-                    <span className="text-slate-900 italic">
-                      "{selectedRecord.notes}"
-                    </span>
+                    <span className="text-slate-800">{selectedRecord.notes}</span>
                   </div>
                 )}
               </div>
             ) : (
               <div className="mt-4 rounded-lg border border-dashed border-slate-200 p-3 text-center text-xs text-slate-500">
-                No attendance recorded for this date (unmarked).
+                No attendance recorded for this date.
               </div>
             )}
 
             {/* Manual Set/Override Form */}
             <form onSubmit={handleSaveDayRecord} className="mt-5 space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Status
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Category
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {STATUS_OPTIONS.map((opt) => {
-                    const active = editStatus === opt;
+                    const active = editStatus === opt.id;
                     let activeClass = '';
                     if (active) {
-                      if (opt === 'WFO') activeClass = 'bg-blue-600 text-white border-blue-600';
-                      else if (opt === 'WFH') activeClass = 'bg-emerald-600 text-white border-emerald-600';
-                      else if (opt === 'LEAVE') activeClass = 'bg-rose-600 text-white border-rose-600';
+                      if (opt.id === 'WFO')
+                        activeClass = 'bg-blue-600 text-white border-blue-600';
+                      else if (opt.id === 'WFH')
+                        activeClass =
+                          'bg-emerald-600 text-white border-emerald-600';
+                      else if (opt.id === 'LEAVE')
+                        activeClass = 'bg-rose-600 text-white border-rose-600';
+                      else if (opt.id === 'HOLIDAY')
+                        activeClass =
+                          'bg-violet-600 text-white border-violet-600';
                     } else {
-                      activeClass = 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50';
+                      activeClass =
+                        'bg-white text-slate-700 border-slate-200 hover:bg-slate-50';
                     }
 
                     return (
                       <button
-                        key={opt}
+                        key={opt.id}
                         type="button"
-                        onClick={() => setEditStatus(opt)}
-                        className={`rounded-lg border px-2 py-2 text-xs font-bold transition text-center ${activeClass}`}
+                        onClick={() => setEditStatus(opt.id)}
+                        className={`rounded-lg border px-2.5 py-2 text-xs font-semibold transition text-center ${activeClass}`}
                       >
-                        {opt}
+                        {opt.label}
                       </button>
                     );
                   })}
@@ -462,14 +513,14 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
                     Arrival Time (24h)
                   </label>
                   <div className="relative">
-                    <Clock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <Clock className="absolute left-3 top-2 h-4 w-4 text-slate-400" />
                     <input
                       type="text"
                       pattern="^([01]\d|2[0-3]):[0-5]\d$"
                       placeholder="09:00"
                       value={editTime}
                       onChange={(e) => setEditTime(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-1.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                      className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-1.5 text-xs text-slate-900 focus:border-slate-900 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -481,10 +532,14 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., Doctor appointment / Remote project"
+                  placeholder={
+                    editStatus === 'HOLIDAY'
+                      ? 'e.g., Independence Day, Diwali'
+                      : 'e.g., Planned leave / Remote sprint'
+                  }
                   value={editNote}
                   onChange={(e) => setEditNote(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-900 focus:border-slate-900 focus:outline-none"
                 />
               </div>
 
@@ -492,10 +547,18 @@ export default function HistoryView({ statusData, onRefreshStatus }) {
                 <button
                   type="submit"
                   disabled={savingDay}
-                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 px-3 py-2 text-xs font-bold text-white transition disabled:opacity-50"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 px-3 py-2 text-xs font-semibold text-white transition disabled:opacity-50"
                 >
                   <Save className="h-3.5 w-3.5" />
-                  <span>{savingDay ? 'Saving...' : `Mark as ${editStatus}`}</span>
+                  <span>
+                    {savingDay
+                      ? 'Saving...'
+                      : `Mark as ${
+                          editStatus === 'HOLIDAY'
+                            ? 'Public Holiday'
+                            : editStatus
+                        }`}
+                  </span>
                 </button>
 
                 {selectedRecord && (

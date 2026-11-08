@@ -385,24 +385,58 @@ function createApp({
         }
 
         const records = store.getMonthlyAttendance(requestedMonth);
+        const recordByDate = {};
+        for (const r of records) {
+          recordByDate[r.date] = r;
+        }
+
         const wfo = records.filter((r) => r.status === 'WFO').length;
         const wfh = records.filter((r) => r.status === 'WFH').length;
         const leave = records.filter((r) => r.status === 'LEAVE').length;
-        const total = wfo + wfh + leave;
+        const holiday = records.filter((r) => r.status === 'HOLIDAY').length;
+        const total = wfo + wfh + leave + holiday;
+
+        // Calculate calendar days, weekend days (Sat/Sun), and total working days
+        // Total working days = days in month excluding Sat, Sun, LEAVE, and HOLIDAY
+        const [yearNum, monthNum] = requestedMonth.split('-').map(Number);
+        const calendarDays = new Date(yearNum, monthNum, 0).getDate();
+        let weekendDays = 0;
+        let weekdayLeave = 0;
+        let weekdayHoliday = 0;
+        for (let d = 1; d <= calendarDays; d += 1) {
+          const dow = new Date(yearNum, monthNum - 1, d).getDay();
+          const dateStr = `${requestedMonth}-${String(d).padStart(2, '0')}`;
+          const rec = recordByDate[dateStr];
+          if (dow === 0 || dow === 6) {
+            weekendDays += 1;
+          } else if (rec?.status === 'LEAVE') {
+            weekdayLeave += 1;
+          } else if (rec?.status === 'HOLIDAY') {
+            weekdayHoliday += 1;
+          }
+        }
+        const weekdays = calendarDays - weekendDays;
+        const totalWorkingDays = Math.max(0, weekdays - weekdayLeave - weekdayHoliday);
+        const unmarkedWorkingDays = Math.max(0, totalWorkingDays - wfo - wfh);
 
         const summary = {
+          calendar_days: calendarDays,
+          weekend_days: weekendDays,
+          weekdays,
+          total_working_days: totalWorkingDays,
+          unmarked_working_days: unmarkedWorkingDays,
           total,
           wfo,
           wfh,
           leave,
-          // Percentages (rounded to 1 decimal place)
-          wfo_percent: total ? Math.round((wfo / total) * 1000) / 10 : 0,
-          wfh_percent: total ? Math.round((wfh / total) * 1000) / 10 : 0,
-          leave_percent: total ? Math.round((leave / total) * 1000) / 10 : 0,
-          // Ratios relative to total (0.00 to 1.00)
-          wfo_ratio: total ? Math.round((wfo / total) * 100) / 100 : 0,
-          wfh_ratio: total ? Math.round((wfh / total) * 100) / 100 : 0,
-          leave_ratio: total ? Math.round((leave / total) * 100) / 100 : 0,
+          holiday,
+          // WFO and WFH percentages calculated based on total working days
+          wfo_percent: totalWorkingDays
+            ? Math.round((wfo / totalWorkingDays) * 1000) / 10
+            : 0,
+          wfh_percent: totalWorkingDays
+            ? Math.round((wfh / totalWorkingDays) * 1000) / 10
+            : 0,
         };
 
         sendJson(res, 200, {
@@ -413,7 +447,7 @@ function createApp({
         return;
       }
 
-      // 4. PUT /api/attendance/YYYY-MM-DD — manually mark a day WFO / WFH / LEAVE, or clear it
+      // 4. PUT /api/attendance/YYYY-MM-DD — manually mark a day WFO / WFH / LEAVE / HOLIDAY, or clear it
       const dayMatch = pathname.match(/^\/api\/attendance\/(\d{4}-\d{2}-\d{2})$/);
       if (req.method === 'PUT' && dayMatch) {
         const date = dayMatch[1];
@@ -436,10 +470,16 @@ function createApp({
           return;
         }
 
-        const status = String(body.status || '').toUpperCase();
-        if (!['WFO', 'WFH', 'LEAVE'].includes(status)) {
+        const rawStatus = String(body.status || '').trim().toUpperCase();
+        const status =
+          rawStatus === 'PUBLIC HOLIDAY' || rawStatus === 'PUBLIC_HOLIDAY'
+            ? 'HOLIDAY'
+            : rawStatus;
+
+        if (!['WFO', 'WFH', 'LEAVE', 'HOLIDAY'].includes(status)) {
           sendJson(res, 400, {
-            error: "status must be 'WFO', 'WFH', 'LEAVE', or null to clear the day",
+            error:
+              "status must be 'WFO', 'WFH', 'LEAVE', 'HOLIDAY', or null to clear the day",
           });
           return;
         }

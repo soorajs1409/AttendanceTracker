@@ -32,10 +32,10 @@ const {
 const { getGeofenceStatus } = require('./src/geofence');
 
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
-  { id: 'history', label: 'Calendar', icon: '📅' },
-  { id: 'settings', label: 'Settings', icon: '⚙️' },
-  { id: 'profile', label: 'Profile', icon: '👤' },
+  { id: 'dashboard', label: 'Dashboard', code: 'DB' },
+  { id: 'history', label: 'Calendar', code: 'CL' },
+  { id: 'settings', label: 'Settings', code: 'ST' },
+  { id: 'profile', label: 'Profile', code: 'PR' },
 ];
 
 function MainShell() {
@@ -112,7 +112,7 @@ function MainShell() {
     return (
       <SafeAreaView style={[styles.safeArea, styles.loadingCenter]}>
         <StatusBar style="dark" />
-        <ActivityIndicator size="large" color="#4f46e5" />
+        <ActivityIndicator size="large" color="#0f172a" />
       </SafeAreaView>
     );
   }
@@ -163,10 +163,10 @@ function MainShell() {
       <View style={styles.header}>
         <View style={styles.brandRow}>
           <View style={styles.logoBadge}>
-            <Text style={styles.logoText}>📍</Text>
+            <Text style={styles.logoText}>AT</Text>
           </View>
           <View>
-            <Text style={styles.headerTitle}>Attendance Tracker</Text>
+            <Text style={styles.headerTitle}>Attendance</Text>
             <Text style={styles.headerSub}>
               {statusData?.user?.username || authUser.username}
             </Text>
@@ -186,7 +186,7 @@ function MainShell() {
           <View
             style={[
               styles.syncDot,
-              { backgroundColor: connError ? '#e11d48' : '#10b981' },
+              { backgroundColor: connError ? '#e11d48' : '#059669' },
             ]}
           />
           <Text
@@ -281,7 +281,12 @@ function MainShell() {
                 style={styles.tabBtn}
                 onPress={() => setActiveTab(tab.id)}
               >
-                <Text style={styles.tabIcon}>{tab.icon}</Text>
+                <View
+                  style={[
+                    styles.tabIndicator,
+                    active && styles.tabIndicatorActive,
+                  ]}
+                />
                 <Text
                   style={[
                     styles.tabLabel,
@@ -332,20 +337,24 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   logoBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    backgroundColor: '#4f46e5',
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#0f172a',
     alignItems: 'center',
     justifyContent: 'center',
   },
   logoText: {
-    fontSize: 17,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: 0.6,
   },
   headerTitle: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#0f172a',
+    letterSpacing: -0.2,
   },
   headerSub: {
     fontSize: 11,
@@ -358,7 +367,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 999,
+    borderRadius: 6,
     borderWidth: 1,
   },
   syncPillOnline: {
@@ -370,8 +379,8 @@ const styles = StyleSheet.create({
     borderColor: '#fecdd3',
   },
   syncDot: {
-    width: 7,
-    height: 7,
+    width: 6,
+    height: 6,
     borderRadius: 999,
   },
   syncText: {
@@ -398,10 +407,10 @@ const styles = StyleSheet.create({
     color: '#9f1239',
   },
   connBannerBtn: {
-    backgroundColor: '#e11d48',
+    backgroundColor: '#0f172a',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 6,
   },
   connBannerBtnText: {
     color: '#ffffff',
@@ -419,25 +428,33 @@ const styles = StyleSheet.create({
   },
   bottomBar: {
     flexDirection: 'row',
-    height: 56,
+    height: 52,
   },
   tabBtn: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
+    position: 'relative',
   },
-  tabIcon: {
-    fontSize: 17,
+  tabIndicator: {
+    position: 'absolute',
+    top: 0,
+    width: 28,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: 'transparent',
+  },
+  tabIndicatorActive: {
+    backgroundColor: '#0f172a',
   },
   tabLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#64748b',
   },
   tabLabelActive: {
-    color: '#4f46e5',
-    fontWeight: '800',
+    color: '#0f172a',
+    fontWeight: '700',
   },
 });
 

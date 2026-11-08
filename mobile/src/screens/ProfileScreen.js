@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 18,
     borderWidth: 1,
     borderColor: '#e2e8f0',
@@ -194,19 +194,19 @@ const styles = StyleSheet.create({
   avatar: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: '#eef2ff',
+    borderRadius: 10,
+    backgroundColor: '#f1f5f9',
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
-    color: '#4f46e5',
+    color: '#0f172a',
   },
   cardTitle: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#0f172a',
   },
   cardSub: {
@@ -232,13 +232,13 @@ const styles = StyleSheet.create({
   linkText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#4f46e5',
+    color: '#334155',
   },
   input: {
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 12,
+    borderRadius: 10,
     paddingHorizontal: 13,
     paddingVertical: 10,
     fontSize: 13,
@@ -246,8 +246,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   primaryBtn: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 12,
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',

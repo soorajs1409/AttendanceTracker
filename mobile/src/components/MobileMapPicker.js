@@ -29,18 +29,18 @@ function buildLeafletHtml(initialLat, initialLng, initialRadius) {
 
     const pinIcon = L.divIcon({
       className: 'pin',
-      html: '<div style="width:30px;height:30px;border-radius:999px;background:#4f46e5;border:3px solid #fff;box-shadow:0 4px 12px rgba(79,70,229,0.45);display:flex;align-items:center;justify-content:center;"><div style="width:8px;height:8px;border-radius:999px;background:#fff;"></div></div>',
-      iconSize: [30, 30],
-      iconAnchor: [15, 15]
+      html: '<div style="width:28px;height:28px;border-radius:999px;background:#0f172a;border:3px solid #fff;box-shadow:0 4px 12px rgba(15,23,42,0.35);display:flex;align-items:center;justify-content:center;"><div style="width:8px;height:8px;border-radius:999px;background:#fff;"></div></div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
     });
 
     const marker = L.marker([startLat, startLng], { draggable: true, icon: pinIcon }).addTo(map);
     const circle = L.circle([startLat, startLng], {
       radius: startRadius,
-      color: '#4f46e5',
+      color: '#0f172a',
       weight: 2,
-      fillColor: '#6366f1',
-      fillOpacity: 0.18
+      fillColor: '#334155',
+      fillOpacity: 0.14
     }).addTo(map);
 
     function notifyRN(lat, lng) {
