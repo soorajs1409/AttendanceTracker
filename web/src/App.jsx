@@ -8,7 +8,7 @@ import {
   Moon,
   Wifi,
   WifiOff,
-  // Smartphone,
+  Smartphone,
 } from 'lucide-react';
 import LoginView from './components/LoginView';
 import SetupView from './components/SetupView';
@@ -146,17 +146,16 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Download Mobile APK Button (Commented out while mobile deployment is disabled)
+            {/* Download Mobile APK Button */}
             <a
               href="/attendance-tracker.apk"
               download="attendance-tracker.apk"
-              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 transition"
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition"
               title="Download Android APK"
             >
               <Smartphone className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Get App</span>
             </a>
-            */}
 
             {/* Connection Status Indicator */}
             <button

@@ -9,8 +9,8 @@ import {
   EyeOff,
   Sun,
   Moon,
-  // Smartphone,
-  // Download,
+  Smartphone,
+  Download,
 } from 'lucide-react';
 import { getAuthUser, updateProfile } from '../api';
 
@@ -189,11 +189,31 @@ export default function ProfileView({
         </div>
       )}
 
-      {/* Mobile App Download Card (Commented out while mobile deployment is disabled)
-      <div className="rounded-lg border border-zinc-200 bg-white p-5 sm:p-6 space-y-3">
-        ...
+      {/* Mobile App Download Card */}
+      <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100">
+            <Smartphone className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Android Application
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Install the mobile APK for automatic workplace geofencing
+            </p>
+          </div>
+        </div>
+
+        <a
+          href="/attendance-tracker.apk"
+          download="attendance-tracker.apk"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-zinc-900 dark:bg-zinc-100 px-3.5 py-2 text-xs font-medium text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition"
+        >
+          <Download className="h-3.5 w-3.5" />
+          <span>Download APK</span>
+        </a>
       </div>
-      */}
 
       {/* Account Actions */}
       <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6 space-y-3">
