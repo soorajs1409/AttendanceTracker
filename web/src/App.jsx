@@ -7,6 +7,7 @@ import {
   MapPinCheck,
   Wifi,
   WifiOff,
+  Smartphone,
 } from 'lucide-react';
 import LoginView from './components/LoginView';
 import SetupView from './components/SetupView';
@@ -125,36 +126,49 @@ export default function App() {
             })}
           </nav>
 
-          {/* Connection Status Indicator */}
-          <button
-            type="button"
-            onClick={() => {
-              if (connError) setActiveTab('settings');
-              else loadStatus();
-            }}
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${
-              connError
-                ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-            }`}
-            title={
-              connError
-                ? `Disconnected: ${connError}. Click to configure connection.`
-                : 'Connected to centralized server'
-            }
-          >
-            {connError ? (
-              <>
-                <WifiOff className="h-3.5 w-3.5" />
-                <span>Offline</span>
-              </>
-            ) : (
-              <>
-                <Wifi className="h-3.5 w-3.5" />
-                <span>Synced</span>
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Download Mobile APK Button */}
+            <a
+              href="/attendance-tracker.apk"
+              download="attendance-tracker.apk"
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition shadow-xs"
+              title="Download Android APK"
+            >
+              <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
+              <span className="hidden sm:inline">Get App</span>
+            </a>
+
+            {/* Connection Status Indicator */}
+            <button
+              type="button"
+              onClick={() => {
+                if (connError) setActiveTab('settings');
+                else loadStatus();
+              }}
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${
+                connError
+                  ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+              }`}
+              title={
+                connError
+                  ? `Disconnected: ${connError}. Click to configure connection.`
+                  : 'Connected to centralized server'
+              }
+            >
+              {connError ? (
+                <>
+                  <WifiOff className="h-3.5 w-3.5" />
+                  <span>Offline</span>
+                </>
+              ) : (
+                <>
+                  <Wifi className="h-3.5 w-3.5" />
+                  <span>Synced</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </header>
 

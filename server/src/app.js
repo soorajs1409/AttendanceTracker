@@ -18,6 +18,7 @@ const MIME_TYPES = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.apk': 'application/vnd.android.package-archive',
 };
 
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;

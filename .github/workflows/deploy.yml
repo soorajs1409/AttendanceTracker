@@ -6,39 +6,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
-    name: Deploy Server & Web (Self-Hosted)
-    runs-on: self-hosted
-    steps:
-      - name: Check out latest code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Build and Deploy Web
-        run: |
-          mkdir -p /opt/attendance-tracker/web
-          npm --prefix web ci || npm --prefix web install
-          npm --prefix web run build
-          rsync -rv --delete web/dist/ /opt/attendance-tracker/web/
-
-      - name: Deploy Server
-        run: |
-          mkdir -p /opt/attendance-tracker/server/data
-          # Sync server code while protecting production DB, .env, and node_modules
-          rsync -rv --delete --exclude 'data/' --exclude 'node_modules/' --exclude '.env' server/ /opt/attendance-tracker/server/
-          cd /opt/attendance-tracker/server
-          npm install --omit=dev
-
-      - name: Restart PM2 Service
-        run: |
-          cd /opt/attendance-tracker/server
-          pm2 restart attendance-server || pm2 start src/index.js --name attendance-server
-          pm2 save
-
   build-apk:
     name: Build Android APK (GitHub Runner)
     runs-on: ubuntu-latest
@@ -95,3 +62,54 @@ jobs:
           name: attendance-tracker-apk
           path: mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
+
+  deploy:
+    name: Deploy Server & Web (Self-Hosted)
+    needs: build-apk
+    if: always()
+    runs-on: self-hosted
+    steps:
+      - name: Check out latest code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download Built APK
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: attendance-tracker-apk
+          path: downloaded-apk
+
+      - name: Build and Deploy Web
+        run: |
+          mkdir -p /opt/attendance-tracker/web
+          npm --prefix web ci || npm --prefix web install
+          npm --prefix web run build
+          rsync -rv --delete web/dist/ /opt/attendance-tracker/web/
+          # If fresh APK was downloaded, link it directly to the web root for one-click browser download
+          if [ -d "downloaded-apk" ]; then
+            APK_FILE=$(find downloaded-apk -name "*.apk" | head -n 1)
+            if [ -n "$APK_FILE" ]; then
+              cp "$APK_FILE" /opt/attendance-tracker/web/attendance-tracker.apk
+              chmod 644 /opt/attendance-tracker/web/attendance-tracker.apk
+              echo "Published $APK_FILE to /opt/attendance-tracker/web/attendance-tracker.apk"
+            fi
+          fi
+
+      - name: Deploy Server
+        run: |
+          mkdir -p /opt/attendance-tracker/server/data
+          # Sync server code while protecting production DB, .env, and node_modules
+          rsync -rv --delete --exclude 'data/' --exclude 'node_modules/' --exclude '.env' server/ /opt/attendance-tracker/server/
+          cd /opt/attendance-tracker/server
+          npm install --omit=dev
+
+      - name: Restart PM2 Service
+        run: |
+          cd /opt/attendance-tracker/server
+          pm2 restart attendance-server || pm2 start src/index.js --name attendance-server
+          pm2 save
