@@ -59,6 +59,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Install Mobile Dependencies
         run: |
           cd mobile
@@ -68,11 +71,13 @@ jobs:
         run: |
           cd mobile
           npx expo prebuild --platform android --clean
+          # Increase network timeout from 10s to 120s to prevent 504 Gateway Timeouts
+          sed -i 's/networkTimeout=10000/networkTimeout=120000/' android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Build Standalone Release APK
         run: |
           cd mobile/android
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon || (echo "Retrying Gradle build..." && sleep 5 && ./gradlew assembleRelease --no-daemon)
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
